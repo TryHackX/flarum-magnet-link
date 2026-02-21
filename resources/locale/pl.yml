@@ -1,0 +1,82 @@
+tryhackx-magnet-link:
+    admin:
+        settings:
+            # Ustawienia ogólne
+            guest_visible_label: "Widoczność dla gości"
+            guest_visible_help: "Pozwól gościom widzieć linki magnet. Jeśli wyłączone, goście zobaczą komunikat z prośbą o rejestrację lub logowanie."
+            
+            activated_only_label: "Tylko aktywowani użytkownicy"
+            activated_only_help: "Tylko użytkownicy z potwierdzonym adresem email mogą widzieć linki magnet. To ustawienie dotyczy tylko zalogowanych użytkowników."
+            
+            # Ustawienia scrapera
+            scraper_enabled_label: "Włącz skrobanie trackerów"
+            scraper_enabled_help: "Po włączeniu rozszerzenie będzie odpytywać trackery o statystyki seed/leech/pobrań. Po wyłączeniu wyświetlana będzie tylko nazwa torrenta i licznik kliknięć."
+            
+            http_only_label: "Tylko trackery HTTP(S)"
+            http_only_help: "Odpytuj tylko trackery HTTP i HTTPS. Włącz, jeśli Twój dostawca hostingu nie zezwala na połączenia UDP."
+            
+            check_all_label: "Sprawdź wszystkie trackery"
+            check_all_help: "Odpytaj wszystkie dostępne trackery i agreguj wyniki zgodnie z ustawieniem typu wyświetlania."
+            
+            display_type_label: "Rodzaj wyświetlania"
+            display_type_help: "Jak agregować statystyki przy sprawdzaniu wielu trackerów."
+            display_type_average: "Średnia dla wszystkich wartości"
+            display_type_average_max: "Średnia dla seed/leech, maksimum dla pobrań"
+            display_type_max_all: "Maksymalne wartości dla wszystkiego"
+            
+            tracker_timeout_label: "Limit czasu trackera (sekundy)"
+            tracker_timeout_help: "Maksymalny czas oczekiwania na odpowiedź trackera. Ustaw 0 dla domyślnego (2 sekundy)."
+            
+            max_trackers_label: "Maksymalna liczba trackerów"
+            max_trackers_help: "Maksymalna liczba odpytywanych trackerów. Ustaw 0 dla nieograniczonej. Przy włączonej opcji 'Sprawdź wszystkie' ogranicza liczbę udanych odpowiedzi."
+            
+            # Ustawienia śledzenia kliknięć
+            click_tracking_label: "Włącz śledzenie kliknięć"
+            click_tracking_help: "Śledź i wyświetlaj liczbę kliknięć każdego linku magnet."
+            
+            ban_enabled_label: "Włącz ochronę przed spamem"
+            ban_enabled_help: "Tymczasowo blokuj adresy IP, które klikają zbyt wiele linków magnet w krótkim czasie, aby zapobiec manipulacji licznikiem kliknięć."
+            
+            ban_time_label: "Czas bana (minuty)"
+            ban_time_help: "Jak długo IP jest zablokowane po przekroczeniu limitu kliknięć."
+            
+            ban_interval_label: "Interwał bana (minuty)"
+            ban_interval_help: "Okno czasowe do zliczania kliknięć w celu określenia, czy IP powinno zostać zbanowane."
+            
+            ban_interval_count_label: "Próg bana"
+            ban_interval_count_help: "Liczba kliknięć w interwale, która uruchamia bana."
+            
+            self_interval_label: "Interwał własnych kliknięć (dni)"
+            self_interval_help: "Jak długo zanim to samo IP może ponownie zwiększyć licznik kliknięć dla tego samego linku magnet."
+
+    forum:
+        loading: "Ładowanie informacji o magnecie..."
+        seeds: "Seedy:"
+        leeches: "Pijawki:"
+        completed: "Pobrano:"
+        clicks: "Kliknięcia:"
+        size: "Rozmiar:"
+        refresh: "Odśwież dane trackerów"
+        guest_not_allowed: "Musisz być zalogowany, aby zobaczyć linki magnet."
+        email_not_confirmed: "Potwierdź swój adres email, aby zobaczyć linki magnet."
+        permission_denied: "Nie masz uprawnień do przeglądania linków magnet."
+        login: "Zaloguj się"
+        register: "Zarejestruj się"
+        or: "lub"
+        
+        editor:
+            tooltip: "Wstaw link Magnet"
+            prompt: "Wprowadź link magnet:"
+            invalid: "Nieprawidłowy link magnet. Link musi zaczynać się od 'magnet:'"
+        
+        errors:
+            invalid_magnet: "Nieprawidłowy format linku magnet"
+            no_trackers: "Link magnet nie zawiera trackerów"
+            no_http_trackers: "Brak trackerów HTTP(S)"
+            no_response: "Żaden tracker nie odpowiedział"
+            scraper_error: "Nie udało się połączyć z trackerami"
+            load_failed: "Nie udało się załadować informacji o magnecie"
+
+    # Nazwa uprawnienia (pokazywana w panelu uprawnień admina)
+    permissions:
+        viewMagnetLinks: "Przeglądanie linków magnet"
