@@ -1,0 +1,48 @@
+{
+    "name": "tryhackx/flarum-magnet-link",
+    "description": "Magnet Link BBCode extension for Flarum with tracker scraping and click counting",
+    "keywords": [
+        "flarum",
+        "extension",
+        "magnet",
+        "torrent",
+        "bbcode",
+        "tracker"
+    ],
+    "type": "flarum-extension",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "TryHackX",
+            "email": "contact@tryhackx.org"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/TryHackX/flarum-magnet-link/issues",
+        "source": "https://github.com/TryHackX/flarum-magnet-link"
+    },
+    "require": {
+        "php": "^8.2",
+        "flarum/core": "^2.0",
+        "s9e/text-formatter": "^2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "TryHackX\\MagnetLink\\": "src/",
+            "Scrapeer\\": "src/Scraper/"
+        }
+    },
+    "extra": {
+        "flarum-extension": {
+            "title": "Magnet Link BBCode",
+            "category": "feature",
+            "icon": {
+                "name": "fas fa-magnet",
+                "color": "#e74c3c",
+                "backgroundColor": "#1a1a2e"
+            }
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}
