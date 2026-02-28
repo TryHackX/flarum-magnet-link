@@ -75,6 +75,31 @@ export default [
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.click_tracking_help', {}, true),
         }))
 
+        // --- Tooltip listy dyskusji ---
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_enabled',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_enabled_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_enabled_help', {}, true),
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_max_magnets',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_magnets_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_magnets_help', {}, true),
+            min: 0,
+            max: 20,
+            default: 3,
+        }))
+
+        // --- Własna nazwa torrenta ---
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.rename_enabled',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.rename_enabled_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.rename_enabled_help', {}, true),
+        }))
+
         // --- Ban system ---
         .setting(() => ({
             setting: 'tryhackx-magnet-link.ban_enabled',

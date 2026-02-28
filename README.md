@@ -1,127 +1,107 @@
-# Flarum Magnet Link BBCode Extension
+# **TryHackX Magnet Link**
 
-A Flarum extension that adds support for magnet links using the `[magnet]...[/magnet]` BBCode tag.
+A powerful, secure, and highly customizable extension for Flarum that allows users to seamlessly share and manage Magnet links.
 
-## Features
+It provides real-time BitTorrent tracker scraping, click statistics, advanced security (hiding raw URIs behind secure hashes), and interactive UI elements like discussion tooltips and custom names.
 
-* **BBCode Tag** `[magnet]<magnet_link>[/magnet]` for inserting magnet links.
-* **Security** - The magnet link is NOT visible in the page source code, only a SHA256 token is exposed.
-* **Tracker Scraping** - Displays seeders, leechers, and completed download counts (powered by the Scrapeer library).
-* **Click Tracking** - Counts unique clicks for each magnet link.
-* **Spam Protection** - Temporary IP banning for excessive clicking to prevent abuse.
-* **Shared Counters** - The same magnet link used across different posts shares the same statistics.
-* **Dynamic Loading** - Data loads automatically via API when the post is displayed (no page slowdowns).
-* **Refresh Button** - Ability to manually refresh tracker data directly from the post.
-* **Multilingual** - Full support for English and Polish languages.
+## **🚀 Versions & Compatibility**
 
-## How it Works (Security)
+This extension is developed in parallel to support both legacy and modern Flarum installations:
 
-1. The user inserts `[magnet]magnet:?xt=...[/magnet]` into a post.
-2. Upon saving the post, the magnet link is:
-* Validated.
-* Saved to the database.
-* Replaced with a unique SHA256 token.
+* **Version 2.x (Current: 2.0.3):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
+* **Version 1.x (Current: 1.0.3):** Supports legacy Flarum 1.8.0 and above.
 
+## **✨ Features**
 
-3. In the page HTML, **ONLY** the token is visible, never the actual magnet link.
-4. When a user clicks the link button, JavaScript sends the token to the API.
-5. The API returns the magnet link **only** to authorized users.
+### **Core Functionality**
+
+* **Secure Embedding**: Raw magnet URIs are never exposed in the HTML source code. They are protected by SHA256 tokens and retrieved securely via API. Guests cannot see or access magnet links in any way (if restricted).  
+* **Text Editor Integration**: Adds a handy magnet icon to the Flarum text editor, allowing users to quickly wrap selected text or insert the \[magnet\]\[/magnet\] BBCode.  
+* **Multilingual**: Full support for English and Polish languages.
+
+### **Real-Time Statistics (Scraper)**
+
+* **Tracker Scraping**: Scrapes HTTP/HTTPS/UDP trackers to display live **Seeders, Leechers, and Completed** downloads (powered by the Scrapeer library).  
+* **Advanced Display Options**: Choose between showing average stats, average max downloads, or max overall stats across all trackers.  
+* **Performance Control**: Configurable timeouts and max tracker limits to ensure forum performance isn't impacted.  
+* **Manual Refresh**: Users can click the refresh button on any magnet link to fetch the latest swarm statistics instantly.
+
+### **Interactive UI Enhancements**
+
+* **Discussion List Tooltips**: Hovering over a discussion on the homepage reveals a clean tooltip displaying the magnet links inside it along with their current stats.  
+* **Frontend Caching**: Implemented a 5-minute client-side cache for both individual magnet links and discussion tooltips to significantly reduce API calls.  
+* **Custom Magnet Names**: Post authors can rename their magnet links directly from the frontend UI without editing the raw post content.  
+* **File Size Display**: Extracts and formats human-readable file sizes (if provided in the magnet URI xl= parameter).
+
+### **Analytics & Protection**
+
+* **Click Tracking**: Live-updating click counters for each magnet link. Shared counters ensure the same link used across different posts shares the exact same statistics.  
+* **Anti-Spam & IP Banning**: Built-in protection against click-spamming, including configurable cooldowns, self-click intervals, and temporary IP bans.
+
+### **Access Control**
+
+* **Granular Permissions**: Restrict viewing of magnet links based on Flarum User Groups.  
+* **Email Confirmation**: Option to require users to have confirmed email addresses before viewing links.  
+* **Guest Control**: Hide or show magnet links to unregistered guests.
+
+## **🔐 How it Works (Security)**
+
+1. The user inserts \[magnet\]magnet:?xt=...\[/magnet\] into a post.  
+2. Upon saving the post, the magnet link is validated, saved to the database, and **replaced with a unique SHA256 token**.  
+3. In the page HTML, **ONLY** the token is visible. The actual magnet URI is never exposed.  
+4. When a user clicks the link, JavaScript sends the token to the API.  
+5. The API validates permissions (Group, Guest status, Email verification) and returns the magnet link **only** to authorized users.  
 6. The browser opens the magnet link.
 
-**Guests cannot see or access magnet links in any way** (if the visibility setting is disabled).
+## **📦 Installation**
 
-## Requirements
+Choose the command corresponding to your Flarum version:
 
-* PHP >= 7.4 with the `sockets` extension enabled (required for UDP trackers).
-* Flarum >= 1.8.0.
+**For Flarum 2.x:**
 
-## Installation
+composer require tryhackx/flarum-magnet-link:"^2.0"
 
-Install the extension via Composer:
+**For Flarum 1.x:**
 
-```bash
-composer require tryhackx/flarum-magnet-link
+composer require tryhackx/flarum-magnet-link:"^1.0"
 
-```
+### **🔄 Updating**
 
-### Updates
-
-To update the extension to the latest version:
-
-```bash
-composer update tryhackx/flarum-magnet-link
-php flarum migrate
+composer update tryhackx/flarum-magnet-link    
+php flarum migrate    
 php flarum cache:clear
 
-```
+## **⚙️ Configuration**
 
-## Configuration
+Go to your Flarum Administration Panel → Extensions → Magnet Link.
 
-Go to your Flarum Administration Panel → Extensions → Magnet Link BBCode.
+1. **General & Visibility Settings**: Control who can see magnet links (Guests, Unverified Users) and set up group permissions.  
+2. **Scraper Settings**: Enable/disable the tracker scraper, enforce HTTP(S)-only trackers (useful if your host blocks UDP), and adjust display logic (Average vs Max).  
+3. **Click Tracking & Bans**: Configure intervals, max clicks, and temporary ban durations for spam protection.  
+4. **Display & UI**: Enable the discussion list tooltip, set the maximum number of magnets to preview, and allow post authors to rename their links.
 
-### General Settings
+## **🛠 Usage**
 
-* **Guest Visibility** - Determine if guests can see the magnet link buttons.
+Users can simply paste a magnet link wrapped in the BBCode, use the editor button, or highlight text and click the editor button:
 
-### Scraper Settings
+\[magnet\]magnet:?xt=urn:btih:EXAMPLEHASH\&dn=Example.File\[/magnet\]
 
-* **Enable Tracker Scraping** - Turn on/off querying trackers for statistics.
-* **HTTP(S) Trackers Only** - Disables UDP trackers (useful if your host blocks UDP or lacks the `sockets` extension).
-* **Check All Trackers** - If enabled, scrapes all trackers in the list; otherwise, stops after the first successful response.
-* **Display Mode** - How to aggregate data from multiple trackers.
-* **Tracker Timeout** - Time limit for tracker responses.
-* **Max Trackers** - Limit the number of trackers to query to improve performance.
+## **Database Structure**
 
-### Click Tracking Settings
+* magnet\_links \- Stores tokens, info hashes, and encrypted full URIs.  
+* magnet\_clicks \- Stores click history.  
+* magnet\_bans \- Stores temporary IP bans.  
+* magnet\_custom\_names \- Stores custom display names set by post authors.
 
-* **Enable Click Tracking** - Count how many times the magnet link is clicked.
-* **Enable Spam Protection** - Temporarily ban IPs that click too frequently.
-* **Ban Duration** - Duration of the temporary block (in minutes).
-* **Self-click Interval** - How often (in days) the same user can increment the click counter.
+## **🚨 Troubleshooting**
 
-## Usage
+* **UDP Trackers are not working:** Enable the "HTTP(S) Trackers Only" option in settings or ensure the sockets PHP extension is installed and enabled on your server.  
+* **500 Error from API:** Check your Flarum/PHP logs. Ensure that you have run the migrations: php flarum migrate.  
+* **Links are not rendering:** Clear the Flarum cache: php flarum cache:clear.
 
-### Using the Post Editor
+## **🔗 Links & Credits**
 
-1. Click the magnet icon on the toolbar.
-2. Paste the full magnet link (starting with `magnet:?xt=urn:btih:`).
-3. Post your reply.
-
-### Manual BBCode
-
-```
-[magnet]magnet:?xt=urn:btih:HASH&dn=NAME&tr=TRACKER[/magnet]
-```
-
-## Database Structure
-
-* `magnet_links` - Stores tokens, info hashes, and encrypted full URIs.
-* `magnet_clicks` - Stores click history.
-* `magnet_bans` - Stores temporary IP bans.
-
-## Troubleshooting
-
-### UDP Trackers are not working
-
-Enable the "HTTP(S) Trackers Only" option in settings or ensure the `sockets` PHP extension is installed and enabled on your server.
-
-### 500 Error from API
-Check your Flarum/PHP logs. Ensure that you have run the migrations:
-
-```bash
-php flarum migrate
-```
-
-### Links are not rendering
-Clear the Flarum cache:
-
-```bash
-php flarum cache:clear
-```
-
-## License
-MIT
-
-## Credits
-* Scraper library: [Scrapeer](https://github.com/medariox/scrapeer) by medariox
+* [GitHub Repository](https://github.com/TryHackX/flarum-magnet-link)  
+* [Report an Issue](https://www.google.com/search?q=https://github.com/TryHackX/flarum-magnet-link/issues)  
+* Scraper library: [Scrapeer](https://github.com/medariox/scrapeer) by medariox  
 * Extension author: TryHackX © 2026
