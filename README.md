@@ -8,8 +8,8 @@ It provides real-time BitTorrent tracker scraping, click statistics, advanced se
 
 This extension is developed in parallel to support both legacy and modern Flarum installations:
 
-* **Version 2.x (Current: 2.0.3):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
-* **Version 1.x (Current: 1.0.3):** Supports legacy Flarum 1.8.0 and above.
+* **Version 2.x (Current: 2.0.5):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
+* **Version 1.x (Current: 1.0.5):** Supports legacy Flarum 1.8.0 and above.
 
 ## **✨ Features**
 
@@ -105,6 +105,6 @@ Users can simply paste a magnet link wrapped in the BBCode, use the editor butto
 ## **🔗 Links & Credits**
 
 * [GitHub Repository](https://github.com/TryHackX/flarum-magnet-link)  
-* [Report an Issue](https://www.google.com/search?q=https://github.com/TryHackX/flarum-magnet-link/issues)  
+* [Report an Issue](https://github.com/TryHackX/flarum-magnet-link/issues)  
 * Scraper library: [Scrapeer](https://github.com/medariox/scrapeer) by medariox  
 * Extension author: TryHackX © 2026
