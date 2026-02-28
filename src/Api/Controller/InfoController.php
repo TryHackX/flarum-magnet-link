@@ -9,6 +9,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
+use TryHackX\MagnetLink\Model\MagnetCustomName;
 use Scrapeer\Scraper;
 
 class InfoController implements RequestHandlerInterface
@@ -107,7 +108,21 @@ class InfoController implements RequestHandlerInterface
             'info_hash' => $magnetLink->info_hash,
             'click_count' => $magnetLink->click_count,
         ];
-        
+
+        // Sprawdź niestandardową nazwę jeśli podano post_id
+        $queryParams = $request->getQueryParams();
+        $postId = isset($queryParams['post_id']) ? (int) $queryParams['post_id'] : null;
+
+        if ($postId) {
+            $customName = MagnetCustomName::findForMagnetAndPost($magnetLink->id, $postId);
+            if ($customName) {
+                $response['custom_name'] = $customName->custom_name;
+                $response['has_custom_name'] = true;
+            } else {
+                $response['has_custom_name'] = false;
+            }
+        }
+
         // Dodaj rozmiar pliku jeśli dostępny
         $fileSize = $magnetLink->getFileSize();
         if ($fileSize !== null) {

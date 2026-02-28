@@ -6,7 +6,7 @@ import app from 'flarum/forum/app';
  */
 export default class MagnetLinkManager {
     constructor() {
-        // Cache danych per token
+        // Cache danych per token:postId
         this.dataCache = new Map();
         // Elementy DOM per token (do aktualizacji)
         this.elements = new Map();
@@ -15,12 +15,20 @@ export default class MagnetLinkManager {
     }
 
     /**
+     * Klucz cache uwzględniający postId (dla niestandardowych nazw)
+     */
+    getCacheKey(token, postId) {
+        return postId ? `${token}:${postId}` : token;
+    }
+
+    /**
      * Inicjalizuj magnet link w elemencie DOM
      * @param {HTMLElement} element - Element DOM
      * @param {string} token - Token SHA256 (NIE magnet link!)
      * @param {number|null} postId - ID posta
+     * @param {number|null} postUserId - ID autora posta
      */
-    async initializeMagnetLink(element, token, postId) {
+    async initializeMagnetLink(element, token, postId, postUserId) {
         // Walidacja tokena (64 znaki hex)
         if (!token || !/^[a-f0-9]{64}$/i.test(token)) {
             this.renderError(element, 'Invalid token');
@@ -44,10 +52,10 @@ export default class MagnetLinkManager {
 
         try {
             // Pobierz dane z API (używając tokena)
-            const data = await this.fetchMagnetData(token);
-            
+            const data = await this.fetchMagnetData(token, postId);
+
             // Renderuj kompletny magnet link
-            this.renderMagnetLink(element, token, data, postId);
+            this.renderMagnetLink(element, token, data, postId, postUserId);
         } catch (error) {
             // Sprawdź czy to błąd uprawnień
             if (error.status === 403) {
@@ -63,7 +71,7 @@ export default class MagnetLinkManager {
                 }
                 return;
             }
-            
+
             console.error('Magnet Link Error:', error);
             this.renderError(element, 'Failed to load magnet info');
         }
@@ -72,21 +80,28 @@ export default class MagnetLinkManager {
     /**
      * Pobierz dane magnetu z API używając tokena
      */
-    async fetchMagnetData(token) {
+    async fetchMagnetData(token, postId) {
+        const cacheKey = this.getCacheKey(token, postId);
+
         // Sprawdź cache
-        const cached = this.dataCache.get(token);
+        const cached = this.dataCache.get(cacheKey);
         if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
             return cached.data;
         }
 
+        let url = app.forum.attribute('apiUrl') + '/magnet/info/' + token;
+        if (postId) {
+            url += '?post_id=' + postId;
+        }
+
         const response = await app.request({
             method: 'GET',
-            url: app.forum.attribute('apiUrl') + '/magnet/info/' + token,
+            url: url,
             errorHandler: this.silentErrorHandler.bind(this)
         });
 
         // Zapisz do cache
-        this.dataCache.set(token, {
+        this.dataCache.set(cacheKey, {
             data: response,
             timestamp: Date.now()
         });
@@ -123,7 +138,7 @@ export default class MagnetLinkManager {
     /**
      * Renderuj kompletny magnet link
      */
-    renderMagnetLink(element, token, data, postId) {
+    renderMagnetLink(element, token, data, postId, postUserId) {
         if (!data.success) {
             // Sprawdź specjalne typy błędów
             if (data.error === 'email_not_confirmed') {
@@ -134,12 +149,15 @@ export default class MagnetLinkManager {
             return;
         }
 
-        const name = data.name || 'Unknown';
+        const originalName = data.name || 'Unknown';
+        const displayName = data.custom_name || originalName;
+        const hasCustomName = data.has_custom_name || false;
         const scrapeEnabled = app.forum.attribute('magnetScraperEnabled');
         const clickTracking = app.forum.attribute('magnetClickTracking');
-        
+        const renameEnabled = app.forum.attribute('magnetRenameEnabled');
+
         let statsHtml = '';
-        
+
         // Statystyki scrapera lub komunikat o błędzie
         if (scrapeEnabled && data.scrape) {
             if (data.scrape.success) {
@@ -197,6 +215,20 @@ export default class MagnetLinkManager {
             `;
         }
 
+        // Przycisk zmiany nazwy (tylko dla autora posta)
+        let renameButtonHtml = '';
+        if (renameEnabled && postId) {
+            const currentUserId = app.session.user ? app.session.user.id() : null;
+            const isAuthor = postUserId && currentUserId && String(postUserId) === String(currentUserId);
+            if (isAuthor) {
+                renameButtonHtml = `
+                    <button class="MagnetLink-rename Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.rename.tooltip')}">
+                        <i class="fas fa-pen"></i>
+                    </button>
+                `;
+            }
+        }
+
         // Główny HTML - UWAGA: brak magnet linka w HTML!
         element.innerHTML = `
             <div class="MagnetLink-container">
@@ -204,9 +236,10 @@ export default class MagnetLinkManager {
                     <span class="MagnetLink-icon">
                         <i class="fas fa-magnet"></i>
                     </span>
-                    <a href="#" class="MagnetLink-name" data-token="${token}" data-post-id="${postId || ''}" title="${this.escapeHtml(name)}">
-                        ${this.escapeHtml(this.truncateName(name, 80))}
+                    <a href="#" class="MagnetLink-name" data-token="${token}" data-post-id="${postId || ''}" title="${this.escapeHtml(displayName)}">
+                        ${this.escapeHtml(this.truncateName(displayName, 80))}
                     </a>
+                    ${renameButtonHtml}
                     ${sizeHtml}
                     ${clicksHtml}
                     <button class="MagnetLink-refresh Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.refresh')}">
@@ -218,13 +251,25 @@ export default class MagnetLinkManager {
         `;
 
         // Dodaj event listenery
-        this.attachEventListeners(element, token, postId);
+        this.attachEventListeners(element, token, postId, postUserId);
+
+        // Animacja rozwijania statystyk/info
+        requestAnimationFrame(() => {
+            const stats = element.querySelector('.MagnetLink-stats');
+            if (stats) {
+                stats.classList.add('MagnetLink-stats--visible');
+            }
+            const info = element.querySelector('.MagnetLink-info');
+            if (info) {
+                info.classList.add('MagnetLink-info--visible');
+            }
+        });
     }
 
     /**
      * Dołącz event listenery
      */
-    attachEventListeners(element, token, postId) {
+    attachEventListeners(element, token, postId, postUserId) {
         // Kliknięcie w link - pobiera magnet URI z API i otwiera
         const linkElement = element.querySelector('.MagnetLink-name');
         if (linkElement) {
@@ -240,7 +285,17 @@ export default class MagnetLinkManager {
             refreshButton.addEventListener('click', async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                await this.handleRefresh(element, token, postId);
+                await this.handleRefresh(element, token, postId, postUserId);
+            });
+        }
+
+        // Przycisk zmiany nazwy
+        const renameButton = element.querySelector('.MagnetLink-rename');
+        if (renameButton) {
+            renameButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                this.showRenameModal(token, postId, element, postUserId);
             });
         }
     }
@@ -280,10 +335,10 @@ export default class MagnetLinkManager {
     /**
      * Obsłuż odświeżenie
      */
-    async handleRefresh(element, token, postId) {
+    async handleRefresh(element, token, postId, postUserId) {
         // Wyczyść cache
-        this.dataCache.delete(token);
-        
+        this.dataCache.delete(this.getCacheKey(token, postId));
+
         // Renderuj loading
         const refreshBtn = element.querySelector('.MagnetLink-refresh i');
         if (refreshBtn) {
@@ -291,14 +346,137 @@ export default class MagnetLinkManager {
         }
 
         try {
-            const data = await this.fetchMagnetData(token);
-            this.renderMagnetLink(element, token, data, postId);
+            const data = await this.fetchMagnetData(token, postId);
+            this.renderMagnetLink(element, token, data, postId, postUserId);
         } catch (error) {
             console.error('Refresh error:', error);
         } finally {
             if (refreshBtn) {
                 refreshBtn.classList.remove('fa-spin');
             }
+        }
+    }
+
+    /**
+     * Pokaż modal zmiany nazwy
+     */
+    showRenameModal(token, postId, element, postUserId) {
+        const cacheKey = this.getCacheKey(token, postId);
+        const cached = this.dataCache.get(cacheKey);
+        const currentName = cached?.data?.custom_name || cached?.data?.name || '';
+        const originalName = cached?.data?.name || '';
+        const hasCustomName = cached?.data?.has_custom_name || false;
+
+        // Utwórz overlay modala
+        const overlay = document.createElement('div');
+        overlay.className = 'MagnetRenameModal-overlay';
+
+        overlay.innerHTML = `
+            <div class="MagnetRenameModal">
+                <div class="MagnetRenameModal-header">
+                    <h3>${app.translator.trans('tryhackx-magnet-link.forum.rename.modal_title')}</h3>
+                    <button class="MagnetRenameModal-close Button Button--icon Button--link">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="MagnetRenameModal-body">
+                    <label>${app.translator.trans('tryhackx-magnet-link.forum.rename.label')}</label>
+                    <input type="text" class="FormControl MagnetRenameModal-input"
+                           value="${this.escapeHtml(currentName)}"
+                           maxlength="500"
+                           placeholder="${this.escapeHtml(originalName)}">
+                    ${hasCustomName ? `
+                        <button class="Button MagnetRenameModal-restore">
+                            <i class="fas fa-undo"></i>
+                            ${app.translator.trans('tryhackx-magnet-link.forum.rename.restore')}
+                        </button>
+                    ` : ''}
+                </div>
+                <div class="MagnetRenameModal-footer">
+                    <button class="Button Button--primary MagnetRenameModal-save">
+                        ${app.translator.trans('tryhackx-magnet-link.forum.rename.save')}
+                    </button>
+                    <button class="Button MagnetRenameModal-cancel">
+                        ${app.translator.trans('tryhackx-magnet-link.forum.rename.cancel')}
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Focus na input
+        const input = overlay.querySelector('.MagnetRenameModal-input');
+        setTimeout(() => input.focus(), 50);
+
+        // Zamknij modal
+        const closeModal = () => overlay.remove();
+
+        overlay.querySelector('.MagnetRenameModal-close').addEventListener('click', closeModal);
+        overlay.querySelector('.MagnetRenameModal-cancel').addEventListener('click', closeModal);
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) closeModal();
+        });
+
+        // Escape zamyka modal
+        const escHandler = (e) => {
+            if (e.key === 'Escape') {
+                closeModal();
+                document.removeEventListener('keydown', escHandler);
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+
+        // Zapisz nową nazwę
+        overlay.querySelector('.MagnetRenameModal-save').addEventListener('click', async () => {
+            const newName = input.value.trim();
+            if (!newName) return;
+
+            try {
+                await app.request({
+                    method: 'POST',
+                    url: app.forum.attribute('apiUrl') + '/magnet/rename',
+                    body: { token, post_id: postId, custom_name: newName }
+                });
+                // Wyczyść cache i przerenderuj
+                this.dataCache.delete(cacheKey);
+                // Wyczyść też cache tooltipa dyskusji
+                if (app.magnetTooltip) app.magnetTooltip.clearCache();
+                const data = await this.fetchMagnetData(token, postId);
+                this.renderMagnetLink(element, token, data, postId, postUserId);
+                closeModal();
+            } catch (error) {
+                console.error('Rename error:', error);
+            }
+        });
+
+        // Enter zapisuje
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                overlay.querySelector('.MagnetRenameModal-save').click();
+            }
+        });
+
+        // Przywróć oryginalną nazwę
+        const restoreBtn = overlay.querySelector('.MagnetRenameModal-restore');
+        if (restoreBtn) {
+            restoreBtn.addEventListener('click', async () => {
+                try {
+                    await app.request({
+                        method: 'DELETE',
+                        url: app.forum.attribute('apiUrl') + '/magnet/rename',
+                        body: { token, post_id: postId }
+                    });
+                    this.dataCache.delete(cacheKey);
+                    // Wyczyść też cache tooltipa dyskusji
+                    if (app.magnetTooltip) app.magnetTooltip.clearCache();
+                    const data = await this.fetchMagnetData(token, postId);
+                    this.renderMagnetLink(element, token, data, postId, postUserId);
+                    closeModal();
+                } catch (error) {
+                    console.error('Restore error:', error);
+                }
+            });
         }
     }
 

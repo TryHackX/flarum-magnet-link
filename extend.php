@@ -36,7 +36,10 @@ return [
     // Rejestracja tras API
     (new Extend\Routes('api'))
         ->get('/magnet/info/{token}', 'magnet.info', Controller\InfoController::class)
-        ->post('/magnet/click', 'magnet.click', Controller\ClickController::class),
+        ->post('/magnet/click', 'magnet.click', Controller\ClickController::class)
+        ->post('/magnet/rename', 'magnet.rename', Controller\RenameController::class)
+        ->delete('/magnet/rename', 'magnet.rename.delete', Controller\RenameController::class)
+        ->get('/magnet/discussion/{discussionId}', 'magnet.discussion', Controller\DiscussionMagnetsController::class),
 
     // Ustawienia rozszerzenia
     (new Extend\Settings())
@@ -54,6 +57,9 @@ return [
         ->default('tryhackx-magnet-link.ban_interval', 10)
         ->default('tryhackx-magnet-link.ban_interval_count', 100)
         ->default('tryhackx-magnet-link.self_interval', 1)
+        ->default('tryhackx-magnet-link.tooltip_enabled', true)
+        ->default('tryhackx-magnet-link.tooltip_max_magnets', 3)
+        ->default('tryhackx-magnet-link.rename_enabled', true)
         ->serializeToForum('magnetGuestVisible', 'tryhackx-magnet-link.guest_visible', function ($value) {
             return (bool) $value;
         })
@@ -64,6 +70,12 @@ return [
             return (bool) $value;
         })
         ->serializeToForum('magnetClickTracking', 'tryhackx-magnet-link.click_tracking', function ($value) {
+            return (bool) $value;
+        })
+        ->serializeToForum('magnetTooltipEnabled', 'tryhackx-magnet-link.tooltip_enabled', function ($value) {
+            return (bool) $value;
+        })
+        ->serializeToForum('magnetRenameEnabled', 'tryhackx-magnet-link.rename_enabled', function ($value) {
             return (bool) $value;
         }),
 

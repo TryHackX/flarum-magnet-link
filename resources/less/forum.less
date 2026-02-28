@@ -23,7 +23,7 @@
     padding: 12px 16px;
     font-family: inherit;
     transition: all 0.3s ease;
-    
+
     &:hover {
         border-color: @magnet-primary;
         box-shadow: 0 2px 12px rgba(231, 76, 60, 0.15);
@@ -49,7 +49,7 @@
     color: white;
     font-size: 16px;
     flex-shrink: 0;
-    
+
     .fa-spin {
         animation: fa-spin 1s linear infinite;
     }
@@ -66,7 +66,7 @@
     cursor: pointer;
     border-bottom: none;
     outline: none;
-    
+
     &:hover,
     &:focus,
     &:active {
@@ -88,11 +88,11 @@
     font-size: 12px;
     color: @magnet-clicks;
     transition: all 0.3s ease;
-    
+
     i {
         font-size: 10px;
     }
-    
+
     &--updated {
         animation: pulse 0.5s ease;
         background: rgba(155, 89, 182, 0.2);
@@ -109,7 +109,7 @@
     border-radius: 12px;
     font-size: 12px;
     color: @magnet-completed;
-    
+
     i {
         font-size: 10px;
     }
@@ -121,11 +121,11 @@
     min-width: auto !important;
     opacity: 0.6;
     transition: opacity 0.2s ease;
-    
+
     &:hover {
         opacity: 1;
     }
-    
+
     i {
         font-size: 14px;
     }
@@ -138,6 +138,19 @@
     gap: 16px;
     margin-top: 12px;
     border-top: 1px solid rgba(0, 0, 0, 0.1);
+
+    // Animacja rozwijania
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    padding-top: 0;
+    transition: max-height 0.4s ease, opacity 0.3s ease 0.1s, padding-top 0.4s ease;
+
+    &.MagnetLink-stats--visible {
+        max-height: 200px;
+        opacity: 1;
+        padding-top: 12px;
+    }
 }
 
 // Komunikat w obszarze statystyk (np. brak trackerów)
@@ -152,7 +165,18 @@
     border-radius: 6px;
     font-size: 12px;
     color: #b7950b;
-    
+
+    // Animacja rozwijania
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.4s ease, opacity 0.3s ease 0.1s;
+
+    &.MagnetLink-info--visible {
+        max-height: 100px;
+        opacity: 1;
+    }
+
     i {
         font-size: 14px;
     }
@@ -163,15 +187,15 @@
     align-items: center;
     gap: 6px;
     font-size: 13px;
-    
+
     i {
         font-size: 12px;
     }
-    
+
     span {
         color: var(--muted-color, #666);
     }
-    
+
     strong {
         font-weight: 700;
     }
@@ -191,31 +215,37 @@
 
 // Stany specjalne
 .MagnetLink-loading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
     .MagnetLink-icon {
         background: #95a5a6;
+        flex-shrink: 0;
     }
-    
+
     .MagnetLink-text {
         color: var(--muted-color, #666);
         font-style: italic;
+        flex: 1;
     }
 }
 
 .MagnetLink-error {
     border-color: @magnet-leeches;
     background: rgba(231, 76, 60, 0.05);
-    
+
     .MagnetLink-container {
         display: flex;
         align-items: center;
         gap: 12px;
     }
-    
+
     .MagnetLink-icon {
         background: @magnet-leeches;
         flex-shrink: 0;
     }
-    
+
     .MagnetLink-text {
         color: @magnet-leeches;
         flex: 1;
@@ -228,20 +258,20 @@
         align-items: center;
         gap: 12px;
     }
-    
+
     .MagnetLink-icon {
         background: #95a5a6;
         flex-shrink: 0;
     }
-    
+
     .MagnetLink-text {
         color: var(--muted-color, #666);
         flex: 1;
-        
+
         a {
             color: @magnet-primary;
             font-weight: 600;
-            
+
             &:hover {
                 text-decoration: underline;
             }
@@ -276,22 +306,22 @@
         flex-direction: column;
         align-items: flex-start;
     }
-    
+
     .MagnetLink-stats {
         flex-direction: column;
         gap: 8px;
     }
-    
+
     .MagnetLink-clicks {
         align-self: flex-start;
     }
-    
+
     .MagnetLink-refresh {
         position: absolute;
         top: 12px;
         right: 12px;
     }
-    
+
     .MagnetLink-container {
         position: relative;
     }
@@ -302,17 +332,219 @@
     .MagnetLink-container {
         background: linear-gradient(135deg, rgba(231, 76, 60, 0.1) 0%, rgba(52, 152, 219, 0.1) 100%);
     }
-    
+
     .MagnetLink-stats {
         border-top-color: rgba(255, 255, 255, 0.1);
     }
 }
 
-// Flarum dark mode class
+// Flarum 1.x dark mode class
 .dark-mode .MagnetLink-container {
     background: linear-gradient(135deg, rgba(231, 76, 60, 0.1) 0%, rgba(52, 152, 219, 0.1) 100%);
-    
+
     .MagnetLink-stats {
         border-top-color: rgba(255, 255, 255, 0.1);
+    }
+}
+
+// Przycisk zmiany nazwy
+.MagnetLink-rename {
+    padding: 2px 6px !important;
+    min-width: auto !important;
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+
+    &:hover {
+        opacity: 1;
+    }
+
+    i {
+        font-size: 12px;
+        color: @magnet-completed;
+    }
+}
+
+// Modal zmiany nazwy
+.MagnetRenameModal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: MagnetModal-fadeIn 0.2s ease;
+}
+
+.MagnetRenameModal {
+    background: var(--body-bg, #fff);
+    border-radius: 12px;
+    padding: 20px;
+    width: 90%;
+    max-width: 450px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    animation: MagnetModal-slideIn 0.2s ease;
+}
+
+.MagnetRenameModal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+
+    h3 {
+        margin: 0;
+        font-size: 16px;
+        color: @magnet-primary;
+    }
+}
+
+.MagnetRenameModal-body {
+    margin-bottom: 16px;
+
+    label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+    .MagnetRenameModal-input {
+        width: 100%;
+        margin-bottom: 8px;
+    }
+}
+
+.MagnetRenameModal-restore {
+    font-size: 12px;
+    color: var(--muted-color, #666);
+
+    i {
+        margin-right: 4px;
+    }
+}
+
+.MagnetRenameModal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+@keyframes MagnetModal-fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes MagnetModal-slideIn {
+    from { transform: translateY(-20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+// Dark mode for modal
+.dark-mode .MagnetRenameModal {
+    background: var(--body-bg, #1a1a2e);
+}
+
+// Tooltip listy dyskusji
+.MagnetTooltip {
+    position: fixed;
+    z-index: 9999;
+    display: none;
+    min-width: 220px;
+    max-width: 400px;
+    background: var(--body-bg, #fff);
+    border: 1px solid @magnet-border;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    padding: 12px;
+    font-size: 13px;
+    animation: MagnetModal-slideIn 0.2s ease;
+
+    &--visible {
+        display: block;
+    }
+}
+
+.MagnetTooltip-content {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.MagnetTooltip-item {
+    padding: 6px 0;
+
+    & + & {
+        border-top: 1px solid rgba(0, 0, 0, 0.05);
+    }
+}
+
+.MagnetTooltip-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    word-break: break-word;
+}
+
+.MagnetTooltip-magnet-icon {
+    color: @magnet-primary;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.MagnetTooltip-stats {
+    display: flex;
+    gap: 12px;
+    font-size: 12px;
+}
+
+.MagnetTooltip-seeds {
+    color: @magnet-seeds;
+
+    i { margin-right: 2px; }
+}
+
+.MagnetTooltip-leeches {
+    color: @magnet-leeches;
+
+    i { margin-right: 2px; }
+}
+
+.MagnetTooltip-completed {
+    color: @magnet-completed;
+
+    i { margin-right: 2px; }
+}
+
+.MagnetTooltip-clicks {
+    color: @magnet-clicks;
+
+    i { margin-right: 2px; }
+}
+
+.MagnetTooltip-loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted-color, #666);
+    font-style: italic;
+
+    i {
+        animation: fa-spin 1s linear infinite;
+    }
+}
+
+// Dark mode for tooltip
+.dark-mode .MagnetTooltip {
+    background: var(--body-bg, #1a1a2e);
+    border-color: rgba(231, 76, 60, 0.4);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+
+    .MagnetTooltip-item + .MagnetTooltip-item {
+        border-top-color: rgba(255, 255, 255, 0.05);
     }
 }

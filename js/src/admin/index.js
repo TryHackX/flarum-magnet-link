@@ -70,6 +70,27 @@ app.initializers.add('tryhackx-magnet-link', () => {
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.click_tracking_help'),
         })
         .registerSetting({
+            setting: 'tryhackx-magnet-link.tooltip_enabled',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_enabled_label'),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_enabled_help'),
+        })
+        .registerSetting({
+            setting: 'tryhackx-magnet-link.tooltip_max_magnets',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_magnets_label'),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_magnets_help'),
+            min: 0,
+            max: 20,
+            default: 3,
+        })
+        .registerSetting({
+            setting: 'tryhackx-magnet-link.rename_enabled',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.rename_enabled_label'),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.rename_enabled_help'),
+        })
+        .registerSetting({
             setting: 'tryhackx-magnet-link.ban_enabled',
             type: 'boolean',
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.ban_enabled_label'),
