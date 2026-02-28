@@ -58,18 +58,21 @@ This extension is developed in parallel to support both legacy and modern Flarum
 Choose the command corresponding to your Flarum version:
 
 **For Flarum 2.x:**
-
+```bash
 composer require tryhackx/flarum-magnet-link:"^2.0"
+```
 
 **For Flarum 1.x:**
-
+```bash
 composer require tryhackx/flarum-magnet-link:"^1.0"
+```
 
 ### **🔄 Updating**
-
-composer update tryhackx/flarum-magnet-link    
-php flarum migrate    
+```bash
+composer update tryhackx/flarum-magnet-link
+php flarum migrate
 php flarum cache:clear
+```
 
 ## **⚙️ Configuration**
 
