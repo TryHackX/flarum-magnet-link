@@ -242,6 +242,9 @@ export default class MagnetLinkManager {
                     ${renameButtonHtml}
                     ${sizeHtml}
                     ${clicksHtml}
+                    <button class="MagnetLink-copy Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.copy_link')}">
+                        <i class="fas fa-copy"></i>
+                    </button>
                     <button class="MagnetLink-refresh Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.refresh')}">
                         <i class="fas fa-sync-alt"></i>
                     </button>
@@ -276,6 +279,16 @@ export default class MagnetLinkManager {
             linkElement.addEventListener('click', async (e) => {
                 e.preventDefault();
                 await this.handleClick(token, postId, element);
+            });
+        }
+
+        // Przycisk kopiowania
+        const copyButton = element.querySelector('.MagnetLink-copy');
+        if (copyButton) {
+            copyButton.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                await this.handleCopy(token, postId, element);
             });
         }
 
@@ -329,6 +342,48 @@ export default class MagnetLinkManager {
         } catch (error) {
             console.error('Click request error:', error);
             // Nie pokazuj błędu użytkownikowi - po prostu nie otwieraj linku
+        }
+    }
+
+    /**
+     * Obsłuż kopiowanie - pobierz magnet URI z API i skopiuj do schowka
+     */
+    async handleCopy(token, postId, element) {
+        const copyBtn = element.querySelector('.MagnetLink-copy i');
+        try {
+            // Wywołaj API click - zwraca magnet_uri (nalicza kliknięcie)
+            const response = await app.request({
+                method: 'POST',
+                url: app.forum.attribute('apiUrl') + '/magnet/click',
+                body: {
+                    token: token,
+                    post_id: postId
+                }
+            });
+
+            if (response.success && response.magnet_uri) {
+                // Aktualizuj licznik kliknięć
+                if (response.click_count !== undefined) {
+                    this.updateClickCountDisplay(token, response.click_count);
+                }
+
+                // Skopiuj do schowka
+                await navigator.clipboard.writeText(response.magnet_uri);
+
+                // Pokaż potwierdzenie - zmień ikonę na check
+                if (copyBtn) {
+                    copyBtn.classList.remove('fa-copy');
+                    copyBtn.classList.add('fa-check');
+                    setTimeout(() => {
+                        copyBtn.classList.remove('fa-check');
+                        copyBtn.classList.add('fa-copy');
+                    }, 1500);
+                }
+            } else {
+                console.error('Copy error:', response.message);
+            }
+        } catch (error) {
+            console.error('Copy request error:', error);
         }
     }
 

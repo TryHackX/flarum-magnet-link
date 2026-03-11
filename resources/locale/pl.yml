@@ -68,6 +68,7 @@ tryhackx-magnet-link:
         clicks: "Kliknięcia:"
         size: "Rozmiar:"
         refresh: "Odśwież dane trackerów"
+        copy_link: "Skopiuj link magnet do schowka"
         guest_not_allowed: "Musisz być zalogowany, aby zobaczyć linki magnet."
         email_not_confirmed: "Potwierdź swój adres email, aby zobaczyć linki magnet."
         permission_denied: "Nie masz uprawnień do przeglądania linków magnet."

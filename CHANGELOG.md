@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Note:** Features marked with \[Flarum 2.x\] apply specifically to the 2.x branch of this extension designed for Flarum 2.0+.
 
+## **\[2.0.6\] / \[1.0.6\] \- 2026-03-11**
+
+### **Added**
+
+* **Copy to Clipboard:** Added a convenient copy icon next to magnet links, allowing users to instantly copy the URL to their clipboard with a single click.
+
 ## **\[2.0.3\] / \[1.0.3\] \- 2026-02-28**
 
 ### **Added**
