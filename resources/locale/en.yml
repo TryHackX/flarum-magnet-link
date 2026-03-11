@@ -68,6 +68,7 @@ tryhackx-magnet-link:
         clicks: "Clicks:"
         size: "Size:"
         refresh: "Refresh tracker data"
+        copy_link: "Copy magnet link to clipboard"
         guest_not_allowed: "You must be logged in to view magnet links."
         email_not_confirmed: "Please confirm your email to view magnet links."
         permission_denied: "You do not have permission to view magnet links."

@@ -115,17 +115,38 @@
     }
 }
 
+// Przycisk kopiowania
+.MagnetLink-copy {
+    padding: 4px 8px !important;
+    min-width: auto !important;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+
+    &:hover {
+        opacity: 1;
+    }
+
+    i {
+        font-size: 14px;
+        transition: color 0.2s ease;
+    }
+
+    i.fa-check {
+        color: @magnet-seeds;
+    }
+}
+
 // Przycisk odświeżenia
 .MagnetLink-refresh {
     padding: 4px 8px !important;
     min-width: auto !important;
     opacity: 0.6;
     transition: opacity 0.2s ease;
-    
+
     &:hover {
         opacity: 1;
     }
-    
+
     i {
         font-size: 14px;
     }
@@ -316,12 +337,18 @@
         align-self: flex-start;
     }
     
+    .MagnetLink-copy {
+        position: absolute;
+        top: 12px;
+        right: 40px;
+    }
+
     .MagnetLink-refresh {
         position: absolute;
         top: 12px;
         right: 12px;
     }
-    
+
     .MagnetLink-container {
         position: relative;
     }

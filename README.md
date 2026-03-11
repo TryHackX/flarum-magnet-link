@@ -8,8 +8,8 @@ It provides real-time BitTorrent tracker scraping, click statistics, advanced se
 
 This extension is developed in parallel to support both legacy and modern Flarum installations:
 
-* **Version 2.x (Current: 2.0.5):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
-* **Version 1.x (Current: 1.0.5):** Supports legacy Flarum 1.8.0 and above.
+* **Version 2.x (Current: 2.0.6):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
+* **Version 1.x (Current: 1.0.6):** Supports legacy Flarum 1.8.0 and above.
 
 ## **✨ Features**
 
