@@ -1,6 +1,6 @@
 {
     "name": "@tryhackx/flarum-magnet-link",
-    "version": "1.0.0",
+    "version": "1.0.7",
     "private": true,
     "devDependencies": {
         "flarum-webpack-config": "^2.0.0",

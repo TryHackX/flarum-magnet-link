@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Note:** Features marked with \[Flarum 2.x\] apply specifically to the 2.x branch of this extension designed for Flarum 2.0+.
 
+## **\[2.0.7\] / \[1.0.7\] \- 2026-04-09**
+
+### **Changed**
+
+* Moved support button to the top of the admin settings page
+* Removed margin-top/padding-top/border-top CSS from the support button section
+
 ## **\[2.0.6\] / \[1.0.6\] \- 2026-03-11**
 
 ### **Added**

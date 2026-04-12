@@ -60,6 +60,13 @@ tryhackx-magnet-link:
             self_interval_label: "Self-Click Interval (days)"
             self_interval_help: "How long before the same IP can increment the click count for the same magnet link again."
 
+        support:
+            button: Support Development
+            title: Support This Extension
+            description: If you find this extension useful, please consider supporting its development with a small donation. Every contribution helps keep the project alive and maintained.
+            copy: Copy address
+            thanks: Thank you for your support!
+
     forum:
         loading: "Loading magnet info..."
         seeds: "Seeds:"

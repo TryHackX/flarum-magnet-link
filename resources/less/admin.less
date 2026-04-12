@@ -21,11 +21,113 @@
         margin-top: 30px;
         padding-bottom: 10px;
         border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        
+
         h3 {
             margin: 0;
             font-size: 16px;
             color: var(--primary-color, #e74c3c);
         }
     }
+}
+
+.MagnetLink-support {
+  text-align: center;
+
+  .Button .icon {
+    color: #e74c3c;
+  }
+}
+
+.SupportModal .Modal-body {
+  padding: 20px 24px;
+}
+
+.SupportModal-description {
+  color: var(--muted-color);
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0 0 20px;
+  text-align: center;
+}
+
+.SupportModal-wallets {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.SupportModal-wallet {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #f9fafb;
+}
+
+.SupportModal-walletHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  margin-bottom: 8px;
+
+  i {
+    font-size: 18px;
+  }
+}
+
+.SupportModal-walletAddress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  code {
+    flex: 1;
+    font-size: 11px;
+    padding: 6px 10px;
+    background: #e5e7eb;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    word-break: break-all;
+    line-height: 1.4;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    user-select: all;
+  }
+}
+
+.SupportModal-copyBtn {
+  flex-shrink: 0;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: #fff;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+
+  &:hover {
+    background: #f3f4f6;
+    color: #374151;
+    border-color: #9ca3af;
+  }
+
+  &--copied {
+    color: #2e7d32 !important;
+    background: #ecfdf5 !important;
+    border-color: #86efac !important;
+  }
+}
+
+.SupportModal-thanks {
+  text-align: center;
+  color: var(--muted-color);
+  font-size: 13px;
+  margin: 16px 0 0;
+  font-style: italic;
 }
