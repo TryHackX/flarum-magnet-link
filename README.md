@@ -8,8 +8,26 @@ It provides real-time BitTorrent tracker scraping, click statistics, advanced se
 
 This extension is developed in parallel to support both legacy and modern Flarum installations:
 
-* **Version 2.x (Current: 2.0.6):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
-* **Version 1.x (Current: 1.0.6):** Supports legacy Flarum 1.8.0 and above.
+* **Version 2.x (Current: 2.0.7):** Fully compatible with the latest Flarum 2.x routing and frontend architecture.  
+* **Version 1.x (Current: 1.0.7):** Supports legacy Flarum 1.8.0 and above.
+
+> **Latest (v1.0.7 / v2.0.7):** Support button moved to top of admin page with CSS improvements.
+
+## Screenshots
+
+![Admin panel with page management, BBCode editor with toolbar, and live preview](assets/preview.gif)
+
+*Admin panel with page management, and live preview.*
+
+## Support Development
+
+If you find this extension useful, consider supporting its development:
+
+- **Monero (XMR):** `45hvee4Jv7qeAm6SrBzXb9YVjb8DkHtFtFh7qkDMxS9zYX3NRi1dV27MtSdVC5X8T1YVoiG8XFiJkh4p9UncqWGxHi4tiwk`
+- **Bitcoin (BTC):** `bc1qncavcek4kknpvykedxas8kxash9kdng990qed2`
+- **Ethereum (ETH):** `0xa3d38d5Cf202598dd782C611e9F43f342C967cF5`
+
+You can also find the donation option in the extension's admin settings panel.
 
 ## **✨ Features**
 
