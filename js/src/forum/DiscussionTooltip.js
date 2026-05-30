@@ -82,7 +82,21 @@ export default class DiscussionTooltip {
             // Sprawdź czy to wciąż aktualne wywołanie show()
             if (this.showGeneration !== generation) return;
 
-            if (!data.success || !data.magnets || data.magnets.length === 0) {
+            if (data.success === false) {
+                // Brak uprawnień (gość / niepotwierdzony email / brak permisji):
+                // pokaż czytelny komunikat w dymku, jeśli admin to włączył.
+                const PERM_ERRORS = ['guest_not_allowed', 'email_not_confirmed', 'permission_denied'];
+                if (PERM_ERRORS.includes(data.error)
+                    && app.forum.attribute('magnetTooltipShowPermissionErrors') !== false) {
+                    this.tooltipElement.innerHTML = this.renderPermissionMessage(data.error);
+                    this.positionTooltip(targetElement);
+                    return;
+                }
+                this.hide();
+                return;
+            }
+
+            if (!data.magnets || data.magnets.length === 0) {
                 this.hide();
                 return;
             }
@@ -121,15 +135,24 @@ export default class DiscussionTooltip {
             return cached.data;
         }
 
-        const response = await app.request({
-            method: 'GET',
-            url: app.forum.attribute('apiUrl') + '/magnet/discussion/' + discussionId,
-            errorHandler(error) {
-                throw error;
-            }
-        });
+        let response;
+        try {
+            response = await app.request({
+                method: 'GET',
+                url: app.forum.attribute('apiUrl') + '/magnet/discussion/' + discussionId,
+            });
+        } catch (error) {
+            // Kontroler zwraca {success:false, error:<typ>} z kodem 403 dla
+            // gości / niepotwierdzonych / bez permisji. Chcemy ten obiekt
+            // zamiast wyjątku, żeby show() mógł wyrenderować komunikat
+            // ("You must be logged in…") w miejsce migającego "Loading...".
+            response = (error && error.response) || {
+                success: false,
+                error: 'load_failed',
+            };
+        }
 
-        // Zapisz do cache
+        // Zapisz do cache (również odpowiedzi błędne — cache ma timeout).
         this.tooltipCache.set(discussionId, {
             data: response,
             timestamp: Date.now()
@@ -213,9 +236,26 @@ export default class DiscussionTooltip {
                     </div>
                 `;
             } else {
+                // Błąd trackerów (np. "No tracker responded") — pokaż komunikat
+                // tak jak na stronie tematu (MagnetLinkManager).
+                let errorHtml = '';
+                if (magnet.scrape && magnet.scrape.error_type) {
+                    const errorKey = 'tryhackx-magnet-link.forum.errors.' + magnet.scrape.error_type;
+                    const errorMessage = app.translator.trans(errorKey) || magnet.scrape.message;
+                    if (errorMessage) {
+                        errorHtml = `
+                            <div class="MagnetTooltip-info">
+                                <i class="fas fa-info-circle"></i>
+                                <span>${escapeHtml(errorMessage)}</span>
+                            </div>
+                        `;
+                    }
+                }
+
                 // Nawet bez scrape pokaż kliknięcia jeśli są
+                let clicksHtml = '';
                 if (magnet.click_count > 0) {
-                    statsHtml = `
+                    clicksHtml = `
                         <div class="MagnetTooltip-stats">
                             <span class="MagnetTooltip-clicks">
                                 <i class="fas fa-mouse-pointer"></i> ${magnet.click_count}
@@ -223,6 +263,8 @@ export default class DiscussionTooltip {
                         </div>
                     `;
                 }
+
+                statsHtml = errorHtml + clicksHtml;
             }
 
             return `
@@ -239,6 +281,41 @@ export default class DiscussionTooltip {
         return `
             <div class="MagnetTooltip-content">
                 ${itemsHtml}
+            </div>
+        `;
+    }
+
+    /**
+     * Renderuj komunikat o braku uprawnień (gość / niepotwierdzony email /
+     * brak permisji) — analogicznie do renderowania w poście (MagnetLinkManager).
+     */
+    renderPermissionMessage(errorType) {
+        const escapeHtml = (text) => {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        };
+
+        let message;
+        if (errorType === 'guest_not_allowed') {
+            message =
+                app.translator.trans('tryhackx-magnet-link.forum.guest_not_allowed') +
+                ' ' +
+                app.translator.trans('tryhackx-magnet-link.forum.login') +
+                ' ' +
+                app.translator.trans('tryhackx-magnet-link.forum.or') +
+                ' ' +
+                app.translator.trans('tryhackx-magnet-link.forum.register');
+        } else if (errorType === 'email_not_confirmed') {
+            message = app.translator.trans('tryhackx-magnet-link.forum.email_not_confirmed');
+        } else {
+            message = app.translator.trans('tryhackx-magnet-link.forum.permission_denied');
+        }
+
+        return `
+            <div class="MagnetTooltip-info MagnetTooltip-info--permission">
+                <i class="fas fa-lock"></i>
+                <span>${escapeHtml(message)}</span>
             </div>
         `;
     }

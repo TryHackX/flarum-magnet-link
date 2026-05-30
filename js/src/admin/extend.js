@@ -91,6 +91,12 @@ export default [
             max: 20,
             default: 3,
         }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_show_permission_errors',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_show_permission_errors_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_show_permission_errors_help', {}, true),
+        }))
 
         // --- Własna nazwa torrenta ---
         .setting(() => ({

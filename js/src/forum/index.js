@@ -65,6 +65,11 @@ app.initializers.add('tryhackx-magnet-link', () => {
     DiscussionListItem.prototype.setupMagnetTooltip = function (tooltip) {
         const element = this.element;
         if (!element || element.hasAttribute('data-magnet-tooltip')) return;
+
+        // Skip discussions whose opening post has no magnet link — avoids a
+        // pointless /magnet/discussion request (and loading flash) on hover.
+        if (!this.attrs.discussion || !this.attrs.discussion.attribute('hasMagnetLinks')) return;
+
         element.setAttribute('data-magnet-tooltip', 'true');
 
         const mainArea = element.querySelector('.DiscussionListItem-main');

@@ -41,6 +41,9 @@ tryhackx-magnet-link:
             tooltip_max_magnets_label: "Maks. magnetów w dymku"
             tooltip_max_magnets_help: "Maksymalna liczba linków magnet wyświetlanych w dymku dyskusji. Ustaw 0 dla nieograniczonej."
 
+            tooltip_show_permission_errors_label: "Pokazuj komunikat o uprawnieniach w dymku"
+            tooltip_show_permission_errors_help: "Gdy gość lub użytkownik bez uprawnień najedzie na temat z magnet linkami, pokaż w dymku czytelny komunikat (\"Musisz być zalogowany…\") zamiast pozwalać mu zniknąć po krótkim mignięciu stanu ładowania. Działa analogicznie do widoku w poście. Domyślnie włączone."
+
             # Własna nazwa torrenta
             rename_enabled_label: "Włącz własne nazwy torrentów"
             rename_enabled_help: "Pozwól autorom postów na zmianę wyświetlanej nazwy linku magnet w ich własnych postach."
@@ -59,6 +62,13 @@ tryhackx-magnet-link:
 
             self_interval_label: "Interwał własnych kliknięć (dni)"
             self_interval_help: "Jak długo zanim to samo IP może ponownie zwiększyć licznik kliknięć dla tego samego linku magnet."
+
+        reparse:
+            label: "Przeliczenie magnet linków"
+            help: "Linki magnet dodane zanim rozszerzenie zostało włączone są zapisane jako zwykły tekst, więc nie renderują się w postach ani nie pojawiają w dymkach. Uruchom to raz (po włączeniu rozszerzenia lub imporcie starych treści), aby je przetworzyć. Dla bardzo dużych forów użyj CLI: php flarum magnet:reparse"
+            button: "Przelicz stare magnet linki"
+            success: "Przetworzono {count} post(ów)."
+            error: "Nie udało się przeliczyć magnet linków. Sprawdź logi serwera."
 
     forum:
         loading: "Ładowanie informacji o magnecie..."
