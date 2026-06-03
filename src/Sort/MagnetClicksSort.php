@@ -1,0 +1,115 @@
+<?php
+
+namespace TryHackX\MagnetLink\Sort;
+
+use Tobyz\JsonApiServer\Context;
+use Tobyz\JsonApiServer\Schema\Sort;
+
+/**
+ * Sorts the discussion list by magnet-link click activity, scoped to each
+ * discussion's own posts ("clicks from this topic").
+ *
+ * Source of truth: the `magnet_clicks` table. Every *counted* magnet click
+ * (ClickController) inserts exactly one row carrying `post_id` and
+ * `click_time`, in lockstep with `magnet_links.click_count`. Posts belong to
+ * discussions, so `magnet_clicks.post_id -> posts.discussion_id` gives a
+ * per-topic attribution with no extra tables, columns or backfill.
+ *
+ * Three modes:
+ *   - 'sum'  → total magnet clicks across every magnet in the topic.
+ *   - 'max'  → clicks of the single most-clicked magnet in the topic
+ *              (groups clicks by magnet, takes the largest group).
+ *   - 'last' → most recent magnet click time in the topic.
+ *
+ * Implemented as correlated sub-queries in `orderByRaw`. The SQL is a fixed
+ * literal (no user input is interpolated — only the validated asc/desc
+ * direction), so it is injection-safe. INNER JOIN to `posts` naturally
+ * excludes clicks whose post was deleted.
+ *
+ * Plugs into Flarum's sort pipeline like `Flarum\Api\Sort\SortColumn`:
+ * `sortMap()` exposes friendly aliases (e.g. `most_magnet_clicks`), and the
+ * framework dispatches to `apply()` by this field's `name`.
+ */
+class MagnetClicksSort extends Sort
+{
+    protected array $alias = [
+        'asc' => null,
+        'desc' => null,
+    ];
+
+    public function __construct(string $name, protected string $mode)
+    {
+        parent::__construct($name);
+    }
+
+    public static function mode(string $name, string $mode): static
+    {
+        return new static($name, $mode);
+    }
+
+    public function ascendingAlias(?string $alias): static
+    {
+        $this->alias['asc'] = $alias;
+
+        return $this;
+    }
+
+    public function descendingAlias(?string $alias): static
+    {
+        $this->alias['desc'] = $alias;
+
+        return $this;
+    }
+
+    public function sortMap(): array
+    {
+        $map = [];
+
+        foreach ($this->alias as $direction => $alias) {
+            if ($alias) {
+                $map[$alias] = ($direction === 'asc' ? '' : '-').$this->name;
+            }
+        }
+
+        return $map;
+    }
+
+    public function apply(object $query, string $direction, Context $context): void
+    {
+        // NOTE: For the discussion list this apply() is generally bypassed —
+        // discussions are listed through Flarum's database Search, which orders
+        // by column name and is overridden by MagnetClicksSortMutator. This
+        // remains a correct fallback for any plain json-api-server listing.
+        $direction = strtolower($direction) === 'asc' ? 'asc' : 'desc';
+
+        $query->orderByRaw(self::expression($this->mode).' '.$direction);
+    }
+
+    /**
+     * The correlated sub-query (topic-scoped) for a given mode. Shared with
+     * MagnetClicksSortMutator so the Search path and the resource path agree.
+     */
+    public static function expression(string $mode): string
+    {
+        return match ($mode) {
+            // Total magnet clicks across all magnets in the topic.
+            'sum' => '(select count(*) from magnet_clicks mc'
+                   . ' inner join posts p on p.id = mc.post_id'
+                   . ' where p.discussion_id = discussions.id)',
+
+            // Clicks of the single most-clicked magnet in the topic.
+            'max' => '(select coalesce(max(c), 0) from ('
+                   . 'select count(*) as c from magnet_clicks mc'
+                   . ' inner join posts p on p.id = mc.post_id'
+                   . ' where p.discussion_id = discussions.id'
+                   . ' group by mc.magnet_link_id) as sub)',
+
+            // Most recent magnet click time in the topic (NULL when none).
+            'last' => '(select max(mc.click_time) from magnet_clicks mc'
+                    . ' inner join posts p on p.id = mc.post_id'
+                    . ' where p.discussion_id = discussions.id)',
+
+            default => '0',
+        };
+    }
+}

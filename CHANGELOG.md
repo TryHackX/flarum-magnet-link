@@ -10,6 +10,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-06-01
+
+> Adds **magnet-click discussion sorts**, consumed by
+> `tryhackx/flarum-homepage-blocks`' Advanced Filters (and usable directly
+> via the API). Plus the Polish Support-modal locale fix.
+
+### Added
+- **Discussion-list sorts by magnet-click activity** (topic-scoped — they
+  count clicks made from each discussion's *own* posts, via
+  `magnet_clicks.post_id → posts.discussion_id`). Three modes, each with a
+  most/least (or recent/oldest) alias:
+  - **Total** (`most_magnet_clicks` / `least_magnet_clicks`) — sum of all
+    magnet clicks across every magnet in the topic.
+  - **Top magnet** (`most_magnet_clicks_single` / `least_magnet_clicks_single`)
+    — clicks of the single most-clicked magnet in the topic.
+  - **Last clicked** (`recently_magnet_clicked` / `oldest_magnet_clicked`) —
+    most recent magnet click time in the topic.
+
+  Implemented as `Sort\MagnetClicksSort` (registers the aliases + validity
+  on `DiscussionResource`) plus `Search\MagnetClicksSortMutator`. The mutator
+  is needed because Flarum lists discussions through its database Search,
+  which orders by *column name*; the mutator runs after the searcher's
+  `applySort()` and swaps in a correlated sub-query. No denormalized
+  columns, listeners or backfill — the existing `magnet_clicks` log (one row
+  per counted click, in lockstep with `magnet_links.click_count`) is the
+  single source of truth.
+- Index `magnet_clicks(post_id, click_time)` (migration
+  `2026_06_01_000000_add_post_id_index_to_magnet_clicks`) supporting the
+  per-topic click sub-queries.
+
+### Fixed
+- **Missing Polish translations for the admin "Support" modal.** The
+  `admin.support` block (`button`, `title`, `description`, `copy`,
+  `thanks`) existed only in `en.yml`, so Polish users saw the English
+  strings in the in-admin Support dialog. Added the Polish strings to
+  `pl.yml`, matching the shared wording used by the other TryHackX
+  extensions. `en.yml` and `pl.yml` now have matching key counts.
+
+### Migrations
+- `2026_06_01_000000_add_post_id_index_to_magnet_clicks.php` — adds a
+  `(post_id, click_time)` index to `magnet_clicks`. Run `php flarum migrate`
+  after updating.
+
+### Notes
+- The sorts only appear in homepage-blocks' filter bar when **this
+  extension is enabled** (homepage-blocks gates the options on it). They
+  rank by recorded clicks, so a discussion with no magnet clicks sorts to
+  the bottom (and NULL last-clicked sorts last).
+
 ## [2.0.9] - 2026-05-30
 
 ### Added

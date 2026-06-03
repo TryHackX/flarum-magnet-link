@@ -70,6 +70,13 @@ tryhackx-magnet-link:
             success: "Przetworzono {count} post(ów)."
             error: "Nie udało się przeliczyć magnet linków. Sprawdź logi serwera."
 
+        support:
+            button: "Wesprzyj rozwój"
+            title: "Wesprzyj tę modyfikację"
+            description: "Jeśli uważasz tę modyfikację za przydatną, rozważ wsparcie jej rozwoju niewielką darowizną. Każdy wkład pomaga utrzymać projekt przy życiu."
+            copy: "Kopiuj adres"
+            thanks: "Dziękuję za wsparcie!"
+
     forum:
         loading: "Ładowanie informacji o magnecie..."
         seeds: "Seedy:"

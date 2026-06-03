@@ -20,6 +20,10 @@ use TryHackX\MagnetLink\Api\Controller;
 use TryHackX\MagnetLink\Provider\MagnetServiceProvider;
 use TryHackX\MagnetLink\Formatter\MagnetConfigurator;
 use TryHackX\MagnetLink\Formatter\MagnetRenderer;
+use TryHackX\MagnetLink\Sort\MagnetClicksSort;
+use TryHackX\MagnetLink\Search\MagnetClicksSortMutator;
+use Flarum\Search\Database\DatabaseSearchDriver;
+use Flarum\Discussion\Search\DiscussionSearcher;
 
 return [
     // Rejestracja service providera
@@ -57,7 +61,23 @@ return [
                     }
                 }),
         ])
-        ->endpoint(Endpoint\Index::class, fn (Endpoint\Index $endpoint) => $endpoint->addDefaultInclude(['firstPost'])),
+        ->endpoint(Endpoint\Index::class, fn (Endpoint\Index $endpoint) => $endpoint->addDefaultInclude(['firstPost']))
+        // Discussion-list sorts by magnet-click activity (topic-scoped — counts
+        // clicks made from this discussion's own posts). Consumed by
+        // tryhackx/flarum-homepage-blocks' Advanced Filters, but registered here
+        // because magnet-link owns the click data; also usable directly via the API
+        // (?sort=most_magnet_clicks etc.).
+        ->sorts(fn () => [
+            MagnetClicksSort::mode('magnetClicksTotal', 'sum')
+                ->descendingAlias('most_magnet_clicks')
+                ->ascendingAlias('least_magnet_clicks'),
+            MagnetClicksSort::mode('magnetClicksMax', 'max')
+                ->descendingAlias('most_magnet_clicks_single')
+                ->ascendingAlias('least_magnet_clicks_single'),
+            MagnetClicksSort::mode('magnetLastClicked', 'last')
+                ->descendingAlias('recently_magnet_clicked')
+                ->ascendingAlias('oldest_magnet_clicked'),
+        ]),
 
     // Rejestracja tras API
     (new Extend\Routes('api'))
@@ -109,6 +129,14 @@ return [
         ->serializeToForum('magnetRenameEnabled', 'tryhackx-magnet-link.rename_enabled', function ($value) {
             return (bool) $value;
         }),
+
+    // Discussion-list ordering for the magnet-click sorts. Flarum lists
+    // discussions through the database Search, which orders by column name;
+    // this mutator swaps in the topic-scoped click sub-query for our virtual
+    // sort fields (see MagnetClicksSortMutator). Coexists with other
+    // SearchDriver extenders (e.g. homepage-blocks' filters).
+    (new Extend\SearchDriver(DatabaseSearchDriver::class))
+        ->addMutator(DiscussionSearcher::class, MagnetClicksSortMutator::class),
 
     // Konfiguracja formatera BBCode
     (new Extend\Formatter())
