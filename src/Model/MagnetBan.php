@@ -58,12 +58,4 @@ class MagnetBan extends AbstractModel
         $ban->ban_time = Carbon::now();
         $ban->save();
     }
-
-    /**
-     * Odbanuj IP
-     */
-    public static function unbanIp(string $ip): void
-    {
-        static::where('ip_address', $ip)->delete();
-    }
 }

@@ -10,15 +10,19 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetCustomName;
-use Scrapeer\Scraper;
+use TryHackX\MagnetLink\Service\TrackerScraper;
+use TryHackX\MagnetLink\Service\RefreshLimiter;
+use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
 
 class InfoController implements RequestHandlerInterface
 {
-    protected SettingsRepositoryInterface $settings;
+    use ResolvesClientIp;
 
-    public function __construct(SettingsRepositoryInterface $settings)
-    {
-        $this->settings = $settings;
+    public function __construct(
+        protected SettingsRepositoryInterface $settings,
+        protected TrackerScraper $scraper,
+        protected RefreshLimiter $refreshLimiter
+    ) {
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -130,76 +134,28 @@ class InfoController implements RequestHandlerInterface
             $response['file_size_formatted'] = $magnetLink->getFormattedFileSize();
         }
 
-        // Scrapuj trackery jeśli włączone
-        $scraperEnabled = (bool) $this->settings->get('tryhackx-magnet-link.scraper_enabled', true);
-        
-        if ($scraperEnabled) {
-            $trackers = $magnetLink->getTrackers();
-            
-            if (!empty($trackers)) {
-                $httpOnly = (bool) $this->settings->get('tryhackx-magnet-link.http_only', false);
-                $timeout = (int) $this->settings->get('tryhackx-magnet-link.tracker_timeout', 2);
-                $maxTrackers = (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0);
-
-                // Filtruj trackery HTTP jeśli włączone
-                if ($httpOnly) {
-                    $trackers = array_filter($trackers, function ($tracker) {
-                        return preg_match('/^https?:\/\//i', $tracker);
-                    });
-                    $trackers = array_values($trackers);
-                }
-
-                if (!empty($trackers)) {
-                    try {
-                        $scraper = new Scraper();
-                        $scrapeResult = $scraper->scrape(
-                            $magnetLink->info_hash,
-                            $trackers,
-                            $maxTrackers > 0 ? $maxTrackers : null,
-                            $timeout > 0 ? $timeout : 2,
-                            false
-                        );
-
-                        if (!empty($scrapeResult[$magnetLink->info_hash])) {
-                            $data = $scrapeResult[$magnetLink->info_hash];
-                            
-                            $response['scrape'] = [
-                                'success' => true,
-                                'seeders' => $data['seeders'] ?? 0,
-                                'leechers' => $data['leechers'] ?? 0,
-                                'completed' => $data['completed'] ?? 0,
-                            ];
-                        } else {
-                            $response['scrape'] = [
-                                'success' => false,
-                                'error_type' => 'no_response',
-                                'message' => 'No tracker responded'
-                            ];
-                        }
-                    } catch (\Exception $e) {
-                        $response['scrape'] = [
-                            'success' => false,
-                            'error_type' => 'scraper_error',
-                            'message' => 'Failed to contact trackers'
-                        ];
-                    }
-                } else {
-                    $response['scrape'] = [
-                        'success' => false,
-                        'error_type' => 'no_http_trackers',
-                        'message' => 'No HTTP(S) trackers available'
-                    ];
-                }
+        // Scrapuj trackery (walidacja hostów, limity, cache i agregacja są
+        // w TrackerScraper). Przycisk odświeżania wysyła ?refresh=1, co — jeśli
+        // limity na to pozwolą — pomija cache i wymusza świeże odpytanie
+        // (a świeży wynik trafia do współdzielonego cache, więc widzą go potem
+        // wszyscy: w temacie, w tooltipie i na stronie głównej).
+        $doBypass = false;
+        if (!empty($queryParams['refresh'])) {
+            $check = $this->refreshLimiter->tryConsume($magnetLink->info_hash, $this->getClientIp($request));
+            if ($check['allowed']) {
+                $doBypass = true;
             } else {
-                $response['scrape'] = [
-                    'success' => false,
-                    'error_type' => 'no_trackers',
-                    'message' => 'Magnet link contains no trackers'
+                // Limit/cooldown — nie scrapujemy ponownie, zwracamy aktualny
+                // (świeży) wynik z cache + podpowiedź dla frontendu.
+                $response['refresh'] = [
+                    'limited' => true,
+                    'reason' => $check['reason'],          // 'cooldown' | 'quota'
+                    'retry_after' => $check['retry_after'],
                 ];
             }
-        } else {
-            $response['scrape'] = null;
         }
+
+        $response['scrape'] = $this->scraper->scrapeForMagnet($magnetLink, null, $doBypass);
 
         return new JsonResponse($response);
     }

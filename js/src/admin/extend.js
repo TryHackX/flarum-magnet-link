@@ -31,6 +31,12 @@ export default [
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.http_only_help', {}, true),
         }))
         .setting(() => ({
+            setting: 'tryhackx-magnet-link.allow_private_trackers',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.allow_private_trackers_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.allow_private_trackers_help', {}, true),
+        }))
+        .setting(() => ({
             setting: 'tryhackx-magnet-link.check_all',
             type: 'boolean',
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.check_all_label', {}, true),
@@ -65,6 +71,52 @@ export default [
             min: 0,
             max: 50,
             default: 0,
+        }))
+
+        // --- Cache wyników ---
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.cache_enabled',
+            type: 'boolean',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.cache_enabled_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.cache_enabled_help', {}, true),
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.cache_ttl',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.cache_ttl_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.cache_ttl_help', {}, true),
+            min: 0,
+            max: 86400,
+            default: 300,
+        }))
+
+        // --- Limity ręcznego odświeżania ---
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.refresh_cooldown',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_cooldown_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_cooldown_help', {}, true),
+            min: 0,
+            max: 86400,
+            default: 30,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.refresh_limit_count',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_limit_count_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_limit_count_help', {}, true),
+            min: 0,
+            max: 1000,
+            default: 10,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.refresh_limit_window',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_limit_window_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.refresh_limit_window_help', {}, true),
+            min: 1,
+            max: 86400,
+            default: 600,
         }))
 
         // --- Click tracking ---

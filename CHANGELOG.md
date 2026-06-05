@@ -10,6 +10,125 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-06-05
+
+> A big release: security & performance hardening of the tracker scraper, the
+> previously non-functional multi-tracker aggregation now actually works, an
+> admin-configurable result cache with rate-limited manual refresh, and a
+> reworked responsive card (with an optional mobile-style-on-desktop). No
+> database changes; forum attributes, sort fields and the `magnet_links` table
+> are unchanged and API responses stay backward-compatible (only an optional
+> `refresh` hint was added to the info endpoint), so
+> `tryhackx/flarum-homepage-blocks` (and the rest of the stack) keep working
+> as-is.
+
+### Security
+- **SSRF guard on tracker scraping.** Trackers come from post content, i.e.
+  they are attacker-controlled. The scraper now resolves each tracker host and
+  refuses any that point at a loopback / private / link-local / reserved IP
+  range (LAN services, cloud metadata, …) before issuing a request. New admin
+  toggle **Allow Private/Internal Trackers** (`allow_private_trackers`,
+  default **off**) for forums that intentionally run a tracker on a private
+  network. Centralised in the new `Service\TrackerScraper`.
+- **Click IP now comes from Flarum core** (`ipAddress` request attribute,
+  which honours the configured trusted proxies) instead of the raw,
+  client-spoofable `CF-Connecting-IP` / `X-Forwarded-For` / `X-Real-IP`
+  headers. The old behaviour let anyone forge an IP to bypass the per-IP click
+  de-dup / ban system or frame another IP into a ban.
+
+### Performance
+- **Bounded scraping.** A magnet now contacts at most a hard-capped number of
+  trackers (12) and is bound by a wall-clock budget (≤15 s per magnet), so a
+  magnet pointing at dead/slow hosts can no longer tie up a PHP-FPM worker.
+  The discussion tooltip scrapes magnets under a single shared 8 s budget. The
+  SSRF host-resolution and each tracker attempt run *inside* that budget (a
+  single attempt's timeout is clamped to the time remaining), and the number of
+  hosts examined per magnet is itself capped.
+- **Tooltip scrapes only what it shows.** The discussion tooltip now slices
+  the magnet list to the configured limit *before* scraping, instead of
+  scraping every magnet in the topic and throwing most of the work away.
+- **Server-side result cache.** Seed/leech/download stats are cached per
+  info-hash, so repeated post views and tooltip hovers don't re-hit the
+  trackers (the main brake on hover-driven load).
+
+### Added
+- **Card display-style settings** (reactive admin group):
+  - **Desktop card style** (`desktop_style`, default `standard`) — choose
+    *Standard* (current single-row layout) or *Mobile style (also on desktop)*,
+    which applies the phone layout at all widths via a `magnet-mobile-style`
+    body class. A description under the select explains the difference and
+    updates live with the selection.
+  - When *Mobile* is selected, two extra options appear:
+    **Max name lines** (`name_max_lines`, default 3) — caps the wrapped torrent
+    name with a `line-clamp` (driven by the `--magnet-name-max-lines` CSS
+    variable) — and **Stats alignment** (`stats_justify`, default
+    `space-between`; also `space-around` / `center` / `flex-start`) for the
+    seed/leech/download row (`--magnet-stats-justify`). Both apply to the phone
+    layout and to desktop when the Mobile style is on.
+  - Serialized as `magnetDesktopStyle` / `magnetNameMaxLines` /
+    `magnetStatsJustify`; the values are whitelisted server-side before they
+    reach CSS.
+- **Cache settings** — *Cache Tracker Results* (`cache_enabled`, default on)
+  and *Cache Lifetime (seconds)* (`cache_ttl`, default 300). They control both
+  the new server cache and the in-browser cache (serialised to the forum as
+  `magnetCacheEnabled` / `magnetCacheTtl`). Set the lifetime to 0 or turn the
+  toggle off to disable caching entirely. The per-link **refresh** button now
+  bypasses both caches (`?refresh=1`) for a genuine re-scrape.
+- **Manual-refresh rate limiting** (`Service\RefreshLimiter`, wired into the
+  `?refresh=1` path of `InfoController`):
+  - **Refresh Cooldown** (`refresh_cooldown`, default 30s) — a *global*
+    per-magnet cooldown. One manual refresh updates the shared cached result
+    that everyone then sees (post, tooltip, homepage), so the same magnet can't
+    be re-refreshed (or hammered) until the cooldown elapses.
+  - **Per-IP quota** (`refresh_limit_count`, default 10, over
+    `refresh_limit_window`, default 600s) — a sliding-window limit keyed by the
+    client IP (covers guests); each used refresh frees up again once it ages out
+    of the window (oldest first). 0 disables either limit.
+  - When a refresh is blocked the API returns the current (fresh, cached) result
+    plus a `refresh` hint (`{limited, reason: cooldown|quota, retry_after}`); the
+    frontend shows a discreet message and greys the refresh button for the
+    cooldown. `refresh_cooldown` is serialised to the forum as
+    `magnetRefreshCooldown`. **Note:** caching must be enabled for the
+    "everyone sees the refreshed result" sharing to work.
+
+### Fixed
+- **"Check All Trackers" and "Display Type" now actually do something.** They
+  were exposed in the admin UI (and advertised since 2.0.3) but no code read
+  them. The scraper now, when *Check All* is on, queries every allowed tracker
+  and aggregates seeders/leechers/completed per *Display Type*
+  (`average` / `average_max_downloads` / `max_all`). With *Check All* off it
+  keeps the previous "first responder wins" behaviour.
+- **Mobile layout of the in-post magnet card** (≤600px, e.g. iPhone SE),
+  reworked to the design concept: row 1 = magnet icon + click-count badge +
+  copy/refresh buttons; row 2 = the **full torrent name wrapped over multiple
+  lines** (no longer truncated) with the rename button; the seed/leech/download
+  stats stay on a single line whose font size scales with screen width
+  (`clamp()` + `vw`) so large numbers still fit. Desktop is unchanged — the
+  name/rename wrapper is `display: contents` on desktop (flattening into the
+  existing single row) and only becomes its own row on phones. The header no
+  longer uses a vertical stack or absolutely-positioned buttons, and the JS no
+  longer hard-truncates the name to 80 chars (desktop now ellipsises a single
+  line, with the full name in the `title` tooltip).
+- **Mobile-layout polish:** the in-post loading spinner's icon is dimmed
+  (translucent grey + softened glyph) so it blends into the dark card instead
+  of looking like a bright tile; the mobile header rules are scoped to
+  `.MagnetLink-header` so they no longer reorder the icon of the loading /
+  error / permission states; and the admin **Support** button stays pinned to
+  the top of the settings page (the new display-style group sits below it).
+
+### Removed / internal
+- Deleted the empty `Provider\MagnetServiceProvider` (both methods were
+  no-ops) and its registration — controller/service dependencies are
+  auto-wired by the container.
+- Stripped the dead debug-logging scaffolding from `MagnetRenderer` (it was
+  permanently disabled and carried a hard-coded developer path
+  `C:/wamp64/www/flarum/...`).
+- Removed unused code: `MagnetLink::findByInfoHash()`, `MagnetBan::unbanIp()`,
+  the unused `Flarum\Group\Group` import and the stale `Version: 1.0.0`
+  docblock in `extend.php`; fixed an implicit-nullable parameter deprecation.
+- De-duplicated the scraping logic that was copy-pasted between
+  `InfoController` and `DiscussionMagnetsController` into `TrackerScraper`.
+
 ## [2.1.0] - 2026-06-01
 
 > Adds **magnet-click discussion sorts**, consumed by

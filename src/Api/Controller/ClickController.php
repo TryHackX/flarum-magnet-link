@@ -11,10 +11,13 @@ use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetClick;
 use TryHackX\MagnetLink\Model\MagnetBan;
+use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
 use Carbon\Carbon;
 
 class ClickController implements RequestHandlerInterface
 {
+    use ResolvesClientIp;
+
     protected SettingsRepositoryInterface $settings;
 
     public function __construct(SettingsRepositoryInterface $settings)
@@ -170,31 +173,5 @@ class ClickController implements RequestHandlerInterface
                 'message' => 'An error occurred'
             ], 500);
         }
-    }
-
-    /**
-     * Pobierz IP klienta uwzględniając proxy
-     */
-    private function getClientIp(ServerRequestInterface $request): string
-    {
-        $serverParams = $request->getServerParams();
-        
-        // Sprawdź headery proxy
-        $headers = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'];
-        
-        foreach ($headers as $header) {
-            if (!empty($serverParams[$header])) {
-                $ip = $serverParams[$header];
-                // Dla X-Forwarded-For weź pierwszy IP
-                if (strpos($ip, ',') !== false) {
-                    $ip = trim(explode(',', $ip)[0]);
-                }
-                if (filter_var($ip, FILTER_VALIDATE_IP)) {
-                    return $ip;
-                }
-            }
-        }
-
-        return '0.0.0.0';
     }
 }

@@ -10,8 +10,21 @@ export default class MagnetLinkManager {
         this.dataCache = new Map();
         // Elementy DOM per token (do aktualizacji)
         this.elements = new Map();
-        // Czas ważności cache (5 minut)
-        this.cacheTimeout = 5 * 60 * 1000;
+    }
+
+    /**
+     * Czy cache jest włączony (sterowane ustawieniem admina).
+     */
+    cacheEnabled() {
+        return app.forum.attribute('magnetCacheEnabled') !== false;
+    }
+
+    /**
+     * Czas ważności cache w ms (z ustawień; domyślnie 5 minut).
+     */
+    cacheTtlMs() {
+        const ttl = parseInt(app.forum.attribute('magnetCacheTtl'), 10);
+        return (Number.isFinite(ttl) && ttl > 0 ? ttl : 300) * 1000;
     }
 
     /**
@@ -80,19 +93,22 @@ export default class MagnetLinkManager {
     /**
      * Pobierz dane magnetu z API używając tokena
      */
-    async fetchMagnetData(token, postId) {
+    async fetchMagnetData(token, postId, forceFresh = false) {
         const cacheKey = this.getCacheKey(token, postId);
 
-        // Sprawdź cache
-        const cached = this.dataCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-            return cached.data;
+        // Sprawdź cache (chyba że wymuszono świeże dane lub cache wyłączony)
+        if (!forceFresh && this.cacheEnabled()) {
+            const cached = this.dataCache.get(cacheKey);
+            if (cached && Date.now() - cached.timestamp < this.cacheTtlMs()) {
+                return cached.data;
+            }
         }
 
+        const params = [];
+        if (postId) params.push('post_id=' + postId);
+        if (forceFresh) params.push('refresh=1');
         let url = app.forum.attribute('apiUrl') + '/magnet/info/' + token;
-        if (postId) {
-            url += '?post_id=' + postId;
-        }
+        if (params.length) url += '?' + params.join('&');
 
         const response = await app.request({
             method: 'GET',
@@ -100,11 +116,13 @@ export default class MagnetLinkManager {
             errorHandler: this.silentErrorHandler.bind(this)
         });
 
-        // Zapisz do cache
-        this.dataCache.set(cacheKey, {
-            data: response,
-            timestamp: Date.now()
-        });
+        // Zapisz do cache (jeśli włączony)
+        if (this.cacheEnabled()) {
+            this.dataCache.set(cacheKey, {
+                data: response,
+                timestamp: Date.now()
+            });
+        }
 
         return response;
     }
@@ -236,18 +254,22 @@ export default class MagnetLinkManager {
                     <span class="MagnetLink-icon">
                         <i class="fas fa-magnet"></i>
                     </span>
-                    <a href="#" class="MagnetLink-name" data-token="${token}" data-post-id="${postId || ''}" title="${this.escapeHtml(displayName)}">
-                        ${this.escapeHtml(this.truncateName(displayName, 80))}
-                    </a>
-                    ${renameButtonHtml}
+                    <span class="MagnetLink-title">
+                        <a href="#" class="MagnetLink-name" data-token="${token}" data-post-id="${postId || ''}" title="${this.escapeHtml(displayName)}">
+                            ${this.escapeHtml(displayName)}
+                        </a>
+                        ${renameButtonHtml}
+                    </span>
                     ${sizeHtml}
                     ${clicksHtml}
-                    <button class="MagnetLink-copy Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.copy_link')}">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                    <button class="MagnetLink-refresh Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.refresh')}">
-                        <i class="fas fa-sync-alt"></i>
-                    </button>
+                    <span class="MagnetLink-actions">
+                        <button class="MagnetLink-copy Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.copy_link')}">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                        <button class="MagnetLink-refresh Button Button--icon Button--link" title="${app.translator.trans('tryhackx-magnet-link.forum.refresh')}">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </span>
                 </div>
                 ${statsHtml}
             </div>
@@ -394,22 +416,76 @@ export default class MagnetLinkManager {
         // Wyczyść cache
         this.dataCache.delete(this.getCacheKey(token, postId));
 
-        // Renderuj loading
-        const refreshBtn = element.querySelector('.MagnetLink-refresh i');
-        if (refreshBtn) {
-            refreshBtn.classList.add('fa-spin');
+        // Spinner na ikonie odświeżania
+        const spinIcon = element.querySelector('.MagnetLink-refresh i');
+        if (spinIcon) {
+            spinIcon.classList.add('fa-spin');
         }
 
         try {
-            const data = await this.fetchMagnetData(token, postId);
+            // Wymuś świeże dane: pomiń cache frontendu i serwera (refresh=1)
+            const data = await this.fetchMagnetData(token, postId, true);
             this.renderMagnetLink(element, token, data, postId, postUserId);
+
+            const limited = data && data.refresh && data.refresh.limited;
+            if (limited) {
+                this.showRefreshLimited(data.refresh);
+            }
+
+            // Wyszarz przycisk na czas cooldownu (lub do końca limitu, gdy
+            // zablokowano). To tylko feedback UX — limity egzekwuje serwer.
+            const cooldown = limited
+                ? Math.max(1, parseInt(data.refresh.retry_after, 10) || 1)
+                : Math.max(0, parseInt(app.forum.attribute('magnetRefreshCooldown'), 10) || 0);
+            if (cooldown > 0) {
+                this.coolDownRefreshButton(element, cooldown);
+            }
         } catch (error) {
             console.error('Refresh error:', error);
-        } finally {
-            if (refreshBtn) {
-                refreshBtn.classList.remove('fa-spin');
+            if (spinIcon) {
+                spinIcon.classList.remove('fa-spin');
             }
         }
+    }
+
+    /**
+     * Dyskretny komunikat o ograniczeniu odświeżania (cooldown / limit per IP).
+     */
+    showRefreshLimited(info) {
+        const seconds = Math.max(1, parseInt(info.retry_after, 10) || 1);
+        const key = info.reason === 'quota'
+            ? 'tryhackx-magnet-link.forum.refresh_limit.quota'
+            : 'tryhackx-magnet-link.forum.refresh_limit.cooldown';
+        let message;
+        try {
+            message = app.translator.trans(key, { seconds });
+        } catch (e) {
+            message = null;
+        }
+        if (!message) return;
+        try {
+            const alertKey = app.alerts.show({ type: 'warning' }, message);
+            setTimeout(() => {
+                try { app.alerts.dismiss(alertKey); } catch (e) {}
+            }, 4000);
+        } catch (e) {}
+    }
+
+    /**
+     * Tymczasowo wyszarza i blokuje przycisk odświeżania w aktualnej karcie.
+     */
+    coolDownRefreshButton(element, seconds) {
+        const btn = element.querySelector('.MagnetLink-refresh');
+        if (!btn) return;
+        btn.classList.add('MagnetLink-refresh--cooldown');
+        btn.disabled = true;
+        setTimeout(() => {
+            const current = element.querySelector('.MagnetLink-refresh');
+            if (current) {
+                current.classList.remove('MagnetLink-refresh--cooldown');
+                current.disabled = false;
+            }
+        }, seconds * 1000);
     }
 
     /**
@@ -640,12 +716,4 @@ export default class MagnetLinkManager {
         return div.innerHTML;
     }
 
-    /**
-     * Skróć nazwę
-     */
-    truncateName(name, maxLength) {
-        if (!name) return '';
-        if (name.length <= maxLength) return name;
-        return name.substring(0, maxLength - 3) + '...';
-    }
 }

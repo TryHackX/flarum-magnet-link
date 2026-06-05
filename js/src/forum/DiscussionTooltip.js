@@ -7,8 +7,6 @@ export default class DiscussionTooltip {
     constructor() {
         // Cache danych per discussionId
         this.tooltipCache = new Map();
-        // Czas ważności cache (5 minut)
-        this.cacheTimeout = 5 * 60 * 1000;
         // Element tooltipa
         this.tooltipElement = null;
         // Aktualnie wyświetlana dyskusja
@@ -126,13 +124,30 @@ export default class DiscussionTooltip {
     }
 
     /**
+     * Czy cache jest włączony (sterowane ustawieniem admina).
+     */
+    cacheEnabled() {
+        return app.forum.attribute('magnetCacheEnabled') !== false;
+    }
+
+    /**
+     * Czas ważności cache w ms (z ustawień; domyślnie 5 minut).
+     */
+    cacheTtlMs() {
+        const ttl = parseInt(app.forum.attribute('magnetCacheTtl'), 10);
+        return (Number.isFinite(ttl) && ttl > 0 ? ttl : 300) * 1000;
+    }
+
+    /**
      * Pobierz dane magnet linków dla dyskusji
      */
     async fetchDiscussionMagnets(discussionId) {
-        // Sprawdź cache
-        const cached = this.tooltipCache.get(discussionId);
-        if (cached && Date.now() - cached.timestamp < this.cacheTimeout) {
-            return cached.data;
+        // Sprawdź cache (jeśli włączony)
+        if (this.cacheEnabled()) {
+            const cached = this.tooltipCache.get(discussionId);
+            if (cached && Date.now() - cached.timestamp < this.cacheTtlMs()) {
+                return cached.data;
+            }
         }
 
         let response;
@@ -153,10 +168,12 @@ export default class DiscussionTooltip {
         }
 
         // Zapisz do cache (również odpowiedzi błędne — cache ma timeout).
-        this.tooltipCache.set(discussionId, {
-            data: response,
-            timestamp: Date.now()
-        });
+        if (this.cacheEnabled()) {
+            this.tooltipCache.set(discussionId, {
+                data: response,
+                timestamp: Date.now()
+            });
+        }
 
         return response;
     }

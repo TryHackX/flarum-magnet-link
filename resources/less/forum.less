@@ -61,7 +61,11 @@
     font-weight: 600;
     color: inherit;
     text-decoration: none;
-    word-break: break-word;
+    // Desktop: pojedyncza linia z wielokropkiem (pełna nazwa w atrybucie title).
+    // Na mobile (media query niżej) nazwa zawija się w całości.
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     transition: color 0.2s ease;
     cursor: pointer;
     border-bottom: none;
@@ -147,9 +151,32 @@
         opacity: 1;
     }
 
+    // Wyszarzony na czas cooldownu (po ręcznym odświeżeniu / przy limicie).
+    &--cooldown {
+        opacity: 0.3 !important;
+        pointer-events: none;
+        cursor: default;
+    }
+
     i {
         font-size: 14px;
     }
+}
+
+// Wrapper tytułu (nazwa + zmiana nazwy) oraz grupa akcji (kopiuj + odśwież).
+// .MagnetLink-title na desktopie jest "display: contents" — znika z layoutu,
+// a jego dzieci (nazwa + ołówek) stają się bezpośrednimi elementami rzędu
+// nagłówka, więc układ desktopowy pozostaje bez zmian. Na mobile (media query
+// niżej) staje się osobnym, pełnej szerokości wierszem z zawijaną nazwą.
+.MagnetLink-title {
+    display: contents;
+}
+
+.MagnetLink-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex-shrink: 0;
 }
 
 // Statystyki
@@ -240,8 +267,11 @@
     align-items: center;
     gap: 12px;
 
+    // Ikona ładowania przygaszona — półprzezroczysta szarość wtapia się w
+    // ciemną kartę (zamiast jasnego, „białego" kwadratu), a glif zmiękczony.
     .MagnetLink-icon {
-        background: #95a5a6;
+        background: rgba(149, 165, 166, 0.28);
+        color: rgba(255, 255, 255, 0.72);
         flex-shrink: 0;
     }
 
@@ -321,37 +351,99 @@
     100% { transform: rotate(360deg); }
 }
 
-// Responsywność
-@media (max-width: 600px) {
-    .MagnetLink-header {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-    
-    .MagnetLink-stats {
-        flex-direction: column;
-        gap: 8px;
-    }
-    
-    .MagnetLink-clicks {
-        align-self: flex-start;
-    }
-    
-    .MagnetLink-copy {
-        position: absolute;
-        top: 12px;
-        right: 40px;
-    }
-
-    .MagnetLink-refresh {
-        position: absolute;
-        top: 12px;
-        right: 12px;
-    }
-
+// Mobilny układ karty (wg koncepcji):
+//   wiersz 1: [ikona] .............. [rozmiar] [kliknięcia] [kopiuj][odśwież]
+//   wiersz 2: [pełna nazwa zawijana do N linii] [ołówek]
+//   statystyki: jeden wiersz; font skaluje się z szerokością (clamp + vw)
+//
+// Wydzielone do mixinu, bo ten sam układ stosujemy w dwóch sytuacjach:
+//   1. @media (max-width: 600px) — telefony (zawsze),
+//   2. body.magnet-mobile-style — gdy admin wybrał styl mobilny także dla
+//      desktopu (ustawienie desktop_style = 'mobile').
+// Limit linii nazwy i wyrównanie statystyk czytane są ze zmiennych CSS
+// ustawianych z forum-atrybutów (patrz forum/index.js).
+.magnet-mobile-card() {
     .MagnetLink-container {
-        position: relative;
+        padding: 10px 12px;
     }
+
+    // Reguły dotyczą TYLKO nagłówka załadowanej karty — zagnieżdżone pod
+    // .MagnetLink-header, żeby nie dotykały ikon stanów loading/error/guest
+    // (które mają .MagnetLink-icon, ale nie .MagnetLink-header).
+    .MagnetLink-header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px 8px;
+
+        // Wiersz 1: ikona przy lewej krawędzi, reszta dosunięta w prawo.
+        // margin-right:auto na ikonie pochłania wolną przestrzeń — działa
+        // niezależnie od tego, które elementy (rozmiar/kliknięcia) są obecne.
+        .MagnetLink-icon    { order: 1; margin-right: auto; }
+        .MagnetLink-size    { order: 2; }
+        .MagnetLink-clicks  { order: 3; }
+        .MagnetLink-actions { order: 4; }
+
+        // Wiersz 2: pełna nazwa (zawijana) + ołówek. flex-basis:100% wypycha
+        // tytuł do własnego wiersza pod spodem.
+        .MagnetLink-title {
+            display: flex;
+            order: 5;
+            flex-basis: 100%;
+            align-items: flex-start;
+            gap: 6px;
+        }
+
+        // Pełna nazwa zawijana, ale maks. N linii (zmienna
+        // --magnet-name-max-lines), potem overflow:hidden + wielokropek.
+        .MagnetLink-name {
+            flex: 1 1 auto;
+            min-width: 0;
+            white-space: normal;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: var(--magnet-name-max-lines, 3);
+            line-clamp: var(--magnet-name-max-lines, 3);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            word-break: break-word;
+            line-height: 1.35;
+        }
+
+        .MagnetLink-rename {
+            flex: 0 0 auto;
+            align-self: flex-start;
+            margin-top: 1px;
+        }
+    }
+
+    // Statystyki w jednej linii (poza .MagnetLink-header); wyrównanie ze
+    // zmiennej --magnet-stats-justify, a rozmiar fontu skaluje się z szerokością
+    // ekranu (clamp + vw), żeby duże liczby zmieściły się obok siebie.
+    .MagnetLink-stats {
+        flex-wrap: nowrap;
+        justify-content: var(--magnet-stats-justify, space-between);
+        gap: 6px;
+    }
+
+    .MagnetLink-stat {
+        gap: 4px;
+        font-size: clamp(9px, 2.7vw, 13px);
+        white-space: nowrap;
+
+        i { font-size: 0.85em; }
+    }
+}
+
+// 1. Telefony — zawsze.
+@media (max-width: 600px) {
+    .magnet-mobile-card();
+}
+
+// 2. Styl mobilny wymuszony także na desktopie (klasa na <body> dodawana
+//    przez forum/index.js, gdy desktop_style = 'mobile').
+body.magnet-mobile-style {
+    .magnet-mobile-card();
 }
 
 // Dark mode support

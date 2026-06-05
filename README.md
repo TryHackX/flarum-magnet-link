@@ -18,22 +18,29 @@ Flarum installations:
   actively developed** — stays available for legacy installs but won't
   receive new features.
 
-> **Latest highlights:**
+> **Latest highlights (2.2.0):**
+> - **SSRF-hardened scraping** — tracker hosts come from post content, so the
+>   scraper now refuses trackers that resolve to private / loopback / reserved
+>   addresses (internal services, cloud metadata), with an admin opt-in for
+>   intentional private trackers. Tracker contacts are capped and bounded by a
+>   wall-clock budget so a malicious magnet can't tie up a worker.
+> - **Configurable result cache** — seed/leech/download stats are cached
+>   (server + browser) with admin controls to set the lifetime or turn it off;
+>   the refresh button forces a genuine re-scrape.
+> - **Rate-limited manual refresh** — the refresh button is bounded by a global
+>   per-magnet cooldown (one refresh updates the shared result everyone sees)
+>   and a per-IP sliding-window quota (guests included), all admin-configurable.
+> - **Responsive card + display styles** — reworked mobile layout (full wrapping
+>   name, single-line stats with a fluid font), plus an admin option to use that
+>   mobile layout on desktop too, with line-clamp and stats-alignment controls.
+> - **"Check All" / "Display Type" now actually work** — they aggregate
+>   seeders/leechers/completed across trackers (average / average-max-downloads
+>   / max-all); previously they were inert settings.
+> - **Click IP from Flarum core** — click de-dup / ban tracking now uses the
+>   framework's resolved IP instead of spoofable proxy headers.
 > - **Magnet backfill** — re-parse posts whose `[magnet]` BBCode was saved
 >   before the extension was active (via `php flarum magnet:reparse` or
->   the new admin button). After running, both the in-post button and the
->   discussion tooltip work.
-> - **Tooltip only fires when there's actually a magnet** — a new
->   `hasMagnetLinks` discussion attribute (computed from the first post's
->   stored XML, no extra queries) lets the client skip the request for
->   magnet-less discussions, eliminating the "Loading magnet info…" flash.
-> - **Permission message in the tooltip** — for guests / unverified /
->   no-permission users, optionally render a clear message
->   ("You must be logged in… Login or Register") instead of letting the
->   loading state flash and disappear (toggle from admin, on by default).
-> - **Tracker error in the tooltip** — when no tracker responds, the
->   tooltip now shows the same localised error message as the in-post
->   widget, instead of just blank.
+>   the admin button).
 
 ## ✨ Features
 
@@ -52,10 +59,20 @@ Flarum installations:
 - **Tracker scraping** for HTTP / HTTPS / UDP trackers, with live
   **Seeders / Leechers / Completed** counts (powered by the
   [Scrapeer](https://github.com/medariox/scrapeer) library).
-- **Aggregation modes** — average, average-max-downloads, or max-all.
+- **SSRF protection** — tracker hosts are resolved and validated before any
+  request; private / loopback / reserved targets are blocked by default
+  (admin opt-in for intentional private trackers). Contacts are capped and
+  time-budgeted so a single magnet can't exhaust a worker.
+- **Aggregation modes** — with *Check All Trackers* on, results are combined
+  across trackers as average, average-max-downloads, or max-all.
+- **Result caching** — stats are cached server-side and in the browser; the
+  lifetime is configurable and caching can be turned off entirely.
 - **Performance knobs** — configurable per-tracker timeout and max
   tracker count.
-- **Manual refresh** — per-link refresh button to re-pull fresh stats.
+- **Manual refresh (rate-limited)** — per-link refresh button to re-pull fresh
+  stats (bypasses the cache for a genuine re-scrape). Bounded by a global
+  per-magnet cooldown — one refresh updates the shared result everyone sees —
+  and a per-IP sliding-window quota that covers guests too; both configurable.
 
 ### Discussion-list tooltip
 
@@ -73,8 +90,9 @@ Flarum installations:
   "You must be logged in to view magnet links. Login or Register"
   (toggle in admin, on by default) instead of letting "Loading…" flash
   and disappear.
-- **5-minute client cache** — same magnet hovered repeatedly only hits
-  the API once.
+- **Configurable client cache** — the same magnet hovered repeatedly only
+  hits the API once within the cache lifetime (default 5 minutes; adjustable
+  or disable-able from admin, in sync with the server-side cache).
 
 ### Backfill for old posts
 
@@ -135,6 +153,15 @@ Both use the same `MagnetReparser` service, which:
 5. The API checks permissions (group, guest, email verification) and
    returns the magnet URI only to authorised users.
 6. The browser opens the magnet link.
+
+**Tracker scraping safety:** a magnet's tracker URLs are attacker-controlled,
+so before contacting any tracker the server resolves its host and refuses
+private / loopback / link-local / reserved addresses (preventing the scraper
+from being used to reach internal services — SSRF). The number of trackers
+contacted per magnet and the total time spent are both capped, and results are
+cached, so scraping can't be turned into a denial-of-service vector. Click
+counting uses Flarum's resolved client IP (honouring trusted proxies) rather
+than spoofable request headers.
 
 ## Screenshots
 
@@ -197,15 +224,24 @@ Go to **Admin → Extensions → Magnet Link**.
 | Activated Users Only | Off | Require email confirmation. |
 | Enable Tracker Scraping | On | Off → only name + click counter shown. |
 | HTTP(S) Trackers Only | Off | Useful if UDP is blocked on your host. |
-| Check All Trackers | Off | Otherwise stop at first responder. |
-| Display Type | Average | Aggregation across trackers. |
-| Tracker Timeout | 2 s | Per-tracker. |
-| Maximum Trackers | 0 (unlimited) | Bound total tracker checks. |
+| **Allow Private/Internal Trackers** | **Off** | Off blocks trackers resolving to private / loopback / reserved IPs (SSRF protection). Enable only for an intentional tracker on a private network. |
+| Check All Trackers | Off | On → contact every allowed tracker and aggregate; off → stop at the first responder. |
+| Display Type | Average | How to aggregate across trackers when *Check All* is on (average / average-max-downloads / max-all). |
+| Tracker Timeout | 2 s | Per-tracker (clamped to the remaining time budget). |
+| Maximum Trackers | 0 | Max trackers contacted per magnet. 0 = built-in safety cap (12); a wall-clock budget also applies. |
+| **Cache Tracker Results** | **On** | Cache stats (server + browser) so repeated views / hovers don't re-query trackers. The main brake on hover-driven load. |
+| **Cache Lifetime (seconds)** | **300** | How long cached stats stay valid. 0 disables caching. |
+| **Refresh Cooldown (seconds)** | **30** | Global per-magnet cooldown for the manual refresh button. One refresh updates the shared result everyone sees; the magnet can't be re-refreshed sooner. 0 = no cooldown. Needs caching on to share the result. |
+| **Refresh Limit (per IP)** | **10** | Max manual refreshes a single IP (guests too) may do within the window below. 0 = unlimited. |
+| **Refresh Limit Window (seconds)** | **600** | Rolling window for the per-IP refresh limit; used slots free up one by one as they age out. |
 | Enable Click Tracking | On | Show click counts and feed the ban system. |
 | Enable Discussion Tooltip | On | Show the hover tooltip on the discussion list. |
 | Max Magnets in Tooltip | 3 | Truncate longer lists. |
 | **Show permission message in tooltip** | **On** | Render "You must be logged in…" in the tooltip when permissions block the request, instead of letting the loading state flash and disappear. |
 | Enable Custom Torrent Names | On | Authors can rename their own magnets. |
+| **Desktop card style** | **Standard** | *Standard* (single-row) or *Mobile style (also on desktop)* — applies the phone layout at all widths. Phones always use the mobile layout. |
+| **Max name lines** | **3** | (Mobile layout) Max lines the wrapped torrent name may use before it's clamped with an ellipsis. |
+| **Stats alignment** | **space-between** | (Mobile layout) How the seed/leech/download stats spread across their line: `space-between` / `space-around` / `center` / `flex-start`. |
 | Enable Spam Protection | On | Temporarily ban IPs that click too many magnets. |
 | Ban Duration / Interval / Threshold | 20 min / 10 min / 100 | Tuning for the ban system. |
 | Self-Click Interval | 1 day | How long before the same IP can re-bump a click. |
@@ -245,11 +281,15 @@ Or use the editor button to insert / wrap the selection automatically.
 
 - **UDP trackers don't work** — enable *HTTP(S) Trackers Only* or
   install / enable the `sockets` PHP extension.
+- **Stats show "no usable trackers"** — the tracker host may resolve to a
+  private / reserved IP and be blocked for safety. If that's intentional
+  (e.g. a LAN tracker), enable *Allow Private/Internal Trackers*.
 - **In-post magnets show as raw `[magnet]…[/magnet]` text** — run the
   backfill (`php flarum magnet:reparse` or the admin button).
 - **500 from the API** — check the Flarum logs, ensure migrations have
   been run.
-- **Stats don't refresh** — clear the Flarum cache.
+- **Stats look stale** — they're cached; use the per-link refresh button to
+  force a re-scrape, or lower *Cache Lifetime* (set 0 to disable caching).
 
 ## 🔗 Links & credits
 

@@ -11,15 +11,17 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetCustomName;
-use Scrapeer\Scraper;
+use TryHackX\MagnetLink\Service\TrackerScraper;
 
 class DiscussionMagnetsController implements RequestHandlerInterface
 {
-    protected SettingsRepositoryInterface $settings;
+    /** Wall-clock budget (seconds) for scraping all magnets shown in one tooltip. */
+    private const TOOLTIP_SCRAPE_BUDGET = 8.0;
 
-    public function __construct(SettingsRepositoryInterface $settings)
-    {
-        $this->settings = $settings;
+    public function __construct(
+        protected SettingsRepositoryInterface $settings,
+        protected TrackerScraper $scraper
+    ) {
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -158,8 +160,9 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                             $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
                         }
 
-                        // Scrape trackerów
-                        $magnetData['scrape'] = $this->scrapeTrackers($magnetLink);
+                        // Scrape odłożony do czasu obcięcia listy do limitu
+                        // tooltipa (żeby nie scrapować magnetów, które odrzucimy).
+                        $magnetData['_model'] = $magnetLink;
 
                         $magnets[] = $magnetData;
                     }
@@ -198,18 +201,28 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                             $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
                         }
 
-                        $magnetData['scrape'] = $this->scrapeTrackers($magnetLink);
+                        $magnetData['_model'] = $magnetLink;
 
                         $magnets[] = $magnetData;
                     }
                 }
             }
 
-            // Ogranicz liczbę magnetów w tooltipie
+            // Ogranicz liczbę magnetów w tooltipie PRZED scrapowaniem.
             $maxMagnets = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_magnets', 3);
             if ($maxMagnets > 0 && count($magnets) > $maxMagnets) {
                 $magnets = array_slice($magnets, 0, $maxMagnets);
             }
+
+            // Scrapuj tylko faktycznie pokazywane magnety, ze wspólnym budżetem
+            // czasu na całe żądanie — żeby jedno najechanie myszką nie mogło
+            // zająć workera na długo.
+            $deadline = microtime(true) + self::TOOLTIP_SCRAPE_BUDGET;
+            foreach ($magnets as &$magnet) {
+                $magnet['scrape'] = $this->scraper->scrapeForMagnet($magnet['_model'], $deadline);
+                unset($magnet['_model']);
+            }
+            unset($magnet);
 
             return new JsonResponse([
                 'success' => true,
@@ -223,80 +236,6 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 'error' => 'server_error',
                 'message' => 'An error occurred'
             ], 500);
-        }
-    }
-
-    /**
-     * Scrapuj trackery dla magneta (logika wspólna z InfoController)
-     */
-    private function scrapeTrackers(MagnetLink $magnetLink): ?array
-    {
-        $scraperEnabled = (bool) $this->settings->get('tryhackx-magnet-link.scraper_enabled', true);
-
-        if (!$scraperEnabled) {
-            return null;
-        }
-
-        $trackers = $magnetLink->getTrackers();
-
-        if (empty($trackers)) {
-            return [
-                'success' => false,
-                'error_type' => 'no_trackers',
-                'message' => 'Magnet link contains no trackers'
-            ];
-        }
-
-        $httpOnly = (bool) $this->settings->get('tryhackx-magnet-link.http_only', false);
-        $timeout = (int) $this->settings->get('tryhackx-magnet-link.tracker_timeout', 2);
-        $maxTrackers = (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0);
-
-        if ($httpOnly) {
-            $trackers = array_filter($trackers, function ($tracker) {
-                return preg_match('/^https?:\/\//i', $tracker);
-            });
-            $trackers = array_values($trackers);
-        }
-
-        if (empty($trackers)) {
-            return [
-                'success' => false,
-                'error_type' => 'no_http_trackers',
-                'message' => 'No HTTP(S) trackers available'
-            ];
-        }
-
-        try {
-            $scraper = new Scraper();
-            $scrapeResult = $scraper->scrape(
-                $magnetLink->info_hash,
-                $trackers,
-                $maxTrackers > 0 ? $maxTrackers : null,
-                $timeout > 0 ? $timeout : 2,
-                false
-            );
-
-            if (!empty($scrapeResult[$magnetLink->info_hash])) {
-                $data = $scrapeResult[$magnetLink->info_hash];
-                return [
-                    'success' => true,
-                    'seeders' => $data['seeders'] ?? 0,
-                    'leechers' => $data['leechers'] ?? 0,
-                    'completed' => $data['completed'] ?? 0,
-                ];
-            }
-
-            return [
-                'success' => false,
-                'error_type' => 'no_response',
-                'message' => 'No tracker responded'
-            ];
-        } catch (\Exception $e) {
-            return [
-                'success' => false,
-                'error_type' => 'scraper_error',
-                'message' => 'Failed to contact trackers'
-            ];
         }
     }
 }

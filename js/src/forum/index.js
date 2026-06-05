@@ -6,6 +6,28 @@ import MagnetLinkManager from './MagnetLinkManager';
 import DiscussionTooltip from './DiscussionTooltip';
 import addTextEditorButton from './addTextEditorButton';
 
+// Ustawienia wyglądu karty (zmienne CSS + klasa stylu mobilnego), czytane z
+// forum-atrybutów. UWAGA: app.forum NIE jest dostępne w momencie uruchamiania
+// initializera, więc stosujemy to leniwie — przy pierwszej inicjalizacji
+// magnetu (gdy app.forum jest już dostępne). Flaga gwarantuje jednokrotność.
+let magnetDisplaySettingsApplied = false;
+function applyMagnetDisplaySettings() {
+    if (magnetDisplaySettingsApplied || !app.forum) return;
+    magnetDisplaySettingsApplied = true;
+
+    const root = document.documentElement;
+    const maxLines = parseInt(app.forum.attribute('magnetNameMaxLines'), 10);
+    root.style.setProperty('--magnet-name-max-lines', String(Number.isFinite(maxLines) && maxLines > 0 ? maxLines : 3));
+
+    const allowedJustify = ['space-between', 'space-around', 'center', 'flex-start'];
+    const justify = app.forum.attribute('magnetStatsJustify');
+    root.style.setProperty('--magnet-stats-justify', allowedJustify.includes(justify) ? justify : 'space-between');
+
+    if (document.body) {
+        document.body.classList.toggle('magnet-mobile-style', app.forum.attribute('magnetDesktopStyle') === 'mobile');
+    }
+}
+
 app.initializers.add('tryhackx-magnet-link', () => {
     // Inicjalizacja managera magnet linków
     app.magnetLinkManager = new MagnetLinkManager();
@@ -23,6 +45,8 @@ app.initializers.add('tryhackx-magnet-link', () => {
     });
 
     CommentPost.prototype.initMagnetLinks = function () {
+        applyMagnetDisplaySettings();
+
         const element = this.element;
         if (!element) return;
 
@@ -97,6 +121,7 @@ app.initializers.add('tryhackx-magnet-link', () => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
                         const magnetElements = node.querySelectorAll?.('.MagnetLink:not([data-initialized])') || [];
+                        if (magnetElements.length) applyMagnetDisplaySettings();
                         magnetElements.forEach((el) => {
                             el.setAttribute('data-initialized', 'true');
                             const token = el.getAttribute('data-token');

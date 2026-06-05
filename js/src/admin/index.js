@@ -41,7 +41,7 @@ app.initializers.add('tryhackx-magnet-link-support', () => {
                 app.translator.trans('tryhackx-magnet-link.admin.support.button'),
             ]),
         ]);
-    });
+    }, 100); // wysoki priorytet — przycisk wsparcia zawsze na samej górze
 });
 
 app.initializers.add('tryhackx-magnet-link-reparse', () => {
@@ -84,4 +84,70 @@ app.initializers.add('tryhackx-magnet-link-reparse', () => {
             ]),
         ]);
     });
+});
+
+// Reaktywna grupa ustawień wyglądu karty:
+//  - wybór stylu desktopu (standard / mobile),
+//  - zmienny opis różnic po wyborze,
+//  - gdy wybrano "mobile": limit linii nazwy + wyrównanie statystyk.
+// Renderowana jako funkcja, więc `this` = strona rozszerzenia (mamy
+// this.setting / this.buildSettingComponent). Zmiana selecta przerysowuje
+// blok, więc pola warunkowe pojawiają się / znikają na żywo.
+app.initializers.add('tryhackx-magnet-link-display-style', () => {
+    const t = (key) => app.translator.trans('tryhackx-magnet-link.admin.settings.' + key, {}, true);
+
+    app.registry.for('tryhackx-magnet-link').registerSetting(function () {
+        const isMobile = this.setting('tryhackx-magnet-link.desktop_style', 'standard')() === 'mobile';
+
+        const items = [
+            this.buildSettingComponent({
+                type: 'select',
+                setting: 'tryhackx-magnet-link.desktop_style',
+                options: {
+                    standard: t('desktop_style_standard'),
+                    mobile: t('desktop_style_mobile'),
+                },
+                label: t('desktop_style_label'),
+                help: t('desktop_style_help'),
+                default: 'standard',
+            }),
+            m(
+                'div',
+                {
+                    className: 'MagnetLink-styleDesc helpText',
+                    style: 'margin:-4px 0 14px;padding:8px 10px;border-left:3px solid #e74c3c;background:rgba(231,76,60,0.06);border-radius:4px;',
+                },
+                isMobile ? t('desktop_style_desc_mobile') : t('desktop_style_desc_standard')
+            ),
+        ];
+
+        if (isMobile) {
+            items.push(
+                this.buildSettingComponent({
+                    type: 'number',
+                    setting: 'tryhackx-magnet-link.name_max_lines',
+                    label: t('name_max_lines_label'),
+                    help: t('name_max_lines_help'),
+                    min: 1,
+                    max: 20,
+                    default: 3,
+                }),
+                this.buildSettingComponent({
+                    type: 'select',
+                    setting: 'tryhackx-magnet-link.stats_justify',
+                    options: {
+                        'space-between': t('stats_justify_space_between'),
+                        'space-around': t('stats_justify_space_around'),
+                        center: t('stats_justify_center'),
+                        'flex-start': t('stats_justify_none'),
+                    },
+                    label: t('stats_justify_label'),
+                    help: t('stats_justify_help'),
+                    default: 'space-between',
+                })
+            );
+        }
+
+        return m('div', { className: 'MagnetLink-displayStyle Form-group' }, items);
+    }, 30);
 });

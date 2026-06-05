@@ -101,14 +101,6 @@ class MagnetLink extends AbstractModel
     }
 
     /**
-     * Znajdź po info_hash (zwraca pierwszy pasujący)
-     */
-    public static function findByInfoHash(string $infoHash): ?self
-    {
-        return static::where('info_hash', strtoupper($infoHash))->first();
-    }
-
-    /**
      * Zwiększ licznik kliknięć
      */
     public function incrementClicks(): void
