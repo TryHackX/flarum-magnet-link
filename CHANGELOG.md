@@ -10,6 +10,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-06-06
+
+### Added
+- **Priority tracker list.** New admin setting **Priority Trackers**
+  (`priority_trackers`, one tracker host per line). When a magnet contains any
+  of the listed trackers, they are contacted first, in list order. This is a
+  pure reorder of the trackers the magnet already has — it never injects
+  trackers that aren't in the magnet, and the SSRF guard, scheme / `http_only`
+  filters, tracker cap and time budget all still apply. Most useful in the
+  default "stop at the first responding tracker" mode, where it makes stats come
+  from a tracker you trust and improves latency/accuracy; with **Check All** it
+  controls which trackers are reached first under the cap/budget. The list is
+  part of the scrape cache key, so editing it takes effect immediately instead
+  of after the TTL.
+
+### Security
+- **Tooltip endpoint now respects discussion/post visibility.** `GET
+  /api/magnet/discussion/{id}` previously queried posts with no visibility
+  scope, so any member holding `viewMagnetLinks` could brute-force discussion
+  IDs and read magnet metadata (and, via the token, reach the magnet URI) from
+  restricted discussions or moderator-hidden posts. It now resolves the
+  discussion with `whereVisibleTo($actor)` and loads only posts visible to the
+  actor; a non-visible discussion returns an empty result without revealing it
+  exists.
+- **Secret per-install token salt (token scheme v2).** Magnet tokens are exposed
+  in post HTML (`data-token`) and were derived from `config('app.key')` with a
+  public constant fallback (`flarum-magnet-salt`); since Flarum never sets
+  `app.key`, that salt was public on practically every install, so anyone could
+  precompute token→URI for known torrents and recover the magnet URI from the
+  page source without permission. Tokens now use a random, per-install secret
+  salt that is never sent to the client (stripped from the admin settings
+  payload). Fresh installs use it immediately; existing installs keep resolving
+  on the legacy salt until a one-off re-tokenization (`php flarum
+  magnet:retokenize` or the **Re-secure magnet tokens** button shown in
+  settings) flips them over — idempotent, and recomputed from the stored URI so
+  it survives any number of version jumps.
+- **Scraper redirects: off by default, configurable, SSRF-validated per hop.**
+  The bundled Scrapeer followed `Location` headers automatically, so a malicious
+  tracker could 3xx-redirect to an internal address past the up-front host check.
+  Redirect-following is now off by default; a new **Max Tracker Redirects**
+  setting (`scraper_max_redirects`, 0–5) lets you allow a few — e.g. for a tracker
+  behind Cloudflare/CDN that redirects http→https — and **every hop is
+  re-validated by the same SSRF guard**, so a redirect can never reach a
+  private/internal host (and only http/https targets are followed).
+- **Scraper caps the tracker response size.** Tracker responses are read with a
+  64 KB limit, so a malicious tracker can't exhaust PHP's memory by returning a
+  huge body (legitimate scrape responses are tiny).
+
+### Performance
+- **Discussion list no longer eager-loads the first post just for
+  `hasMagnetLinks`.** The attribute is read from a denormalized
+  `discussions.has_magnet_links` column (backfilled by a migration, kept in sync
+  by `Posted`/`Revised` listeners and the re-parser) instead of the global
+  `addDefaultInclude(['firstPost'])` this extension previously added. (Flarum's
+  own discussion list still includes `mostRelevantPost`; this only removes the
+  extra first-post load the extension itself caused.)
+- **Tooltip endpoint loads custom names in one query.** The per-magnet
+  `magnet_custom_names` lookup (an N+1 across a discussion's posts) is replaced by
+  a single `whereIn` keyed into an in-memory map.
+
+### Changed
+- `RenameController` now gates on `$actor->assertRegistered()` (idiomatic,
+  framework-formatted error); the per-post author check remains the real
+  authorization.
+
+### Internal
+- New `Service\TokenRetokenizer`, `Console\RetokenizeMagnetsCommand`,
+  `Api\Controller\RetokenizeController`, and a migration that provisions the
+  secret salt and marks fresh installs as already on token scheme v2.
+- New `Concerns\ChecksMagnetAccess` trait de-duplicates the guest/email/permission
+  gate across the Info/Click/DiscussionMagnets controllers (kept as custom JSON
+  responses rather than Flarum policies, to preserve the frontend's error shapes).
+- Unexpected exceptions in the Click/DiscussionMagnets/Rename controllers are now
+  logged instead of silently swallowed. Tracker failures don't reach these
+  catches (they're handled inside `TrackerScraper`), so this doesn't flood logs.
+- New `Listener\SyncDiscussionMagnetFlag` keeps the denormalized flag in sync.
+
 ## [2.2.0] - 2026-06-05
 
 > A big release: security & performance hardening of the tracker scraper, the

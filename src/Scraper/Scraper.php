@@ -28,6 +28,15 @@ class Scraper {
     const VERSION = '0.5.4';
 
     /**
+     * Max bytes read from an HTTP(S) tracker response (TryHackX hardening).
+     * Scrape/announce responses are tiny; capping the read prevents a malicious
+     * tracker from exhausting PHP's memory by returning a huge body.
+     *
+     * @var int
+     */
+    const MAX_RESPONSE_BYTES = 65536;
+
+    /**
      * Array of errors
      *
      * @var array
@@ -47,6 +56,40 @@ class Scraper {
      * @var int
      */
     private $timeout;
+
+    /**
+     * Max number of HTTP(S) redirects to follow (TryHackX). 0 = none (safe
+     * default). Each hop is re-validated by {@see $host_validator}.
+     *
+     * @var int
+     */
+    private $max_redirects = 0;
+
+    /**
+     * Optional callable(string $host): bool deciding whether a redirect target
+     * host is allowed — the SSRF guard for redirect hops. Null = allow any.
+     *
+     * @var callable|null
+     */
+    private $host_validator = null;
+
+    /**
+     * Sets the maximum number of HTTP(S) redirects to follow per request.
+     *
+     * @param int $max Maximum redirects (clamped to >= 0).
+     */
+    public function set_max_redirects( $max ) {
+        $this->max_redirects = max( 0, (int) $max );
+    }
+
+    /**
+     * Sets a per-hop redirect host validator (SSRF guard for redirects).
+     *
+     * @param callable|null $validator function(string $host): bool
+     */
+    public function set_host_validator( $validator ) {
+        $this->host_validator = $validator;
+    }
 
     /**
      * Initiates the scraper
@@ -252,21 +295,139 @@ class Scraper {
      * @return string Request response.
      */
     private function http_request( $query, $host, $port ) {
-        $context = stream_context_create( array(
-            'http' => array(
-                'timeout' => $this->timeout,
-            ),
-        ));
+        $url = $query;
+        $redirects_left = $this->max_redirects;
+        $response = false;
 
-        if ( false === ( $response = @file_get_contents( $query, false, $context ) ) ) {
-            throw new \Exception( 'Invalid scrape connection (' . $host . ':' . $port . ').' );
+        while ( true ) {
+            $context = stream_context_create( array(
+                'http' => array(
+                    'timeout' => $this->timeout,
+                    // We never let the stream wrapper auto-follow redirects: each
+                    // hop must be re-validated by the SSRF guard below, otherwise a
+                    // malicious tracker could 3xx-bounce us to an internal host.
+                    'follow_location' => 0,
+                    'max_redirects' => 1,
+                    // So a 3xx response returns its body/headers (not false) and we
+                    // can read the Location header to follow it ourselves.
+                    'ignore_errors' => true,
+                ),
+            ));
+
+            $response = @file_get_contents( $url, false, $context, 0, self::MAX_RESPONSE_BYTES );
+            if ( false === $response ) {
+                throw new \Exception( 'Invalid scrape connection (' . $host . ':' . $port . ').' );
+            }
+
+            $headers = isset( $http_response_header ) ? $http_response_header : array();
+            $status = $this->http_status_from_headers( $headers );
+
+            if ( $status >= 300 && $status < 400 && $redirects_left > 0 ) {
+                $location = $this->http_header_value( $headers, 'Location' );
+                if ( '' === $location ) {
+                    break;
+                }
+
+                $next = $this->resolve_redirect_url( $url, $location );
+                $next_host = (string) parse_url( $next, PHP_URL_HOST );
+                if ( '' === $next_host ) {
+                    throw new \Exception( 'Invalid redirect target from tracker (' . $host . ').' );
+                }
+
+                // SSRF: every redirect hop is checked against the same host policy
+                // as the original tracker.
+                if ( null !== $this->host_validator && ! call_user_func( $this->host_validator, $next_host ) ) {
+                    throw new \Exception( 'Blocked tracker redirect to non-public host (' . $next_host . ').' );
+                }
+
+                $url = $next;
+                $redirects_left--;
+                continue;
+            }
+
+            break;
         }
 
-        if ( substr( $response, 0, 12 ) !== 'd5:filesd20:' ) {
+        if ( ! is_string( $response ) || substr( $response, 0, 12 ) !== 'd5:filesd20:' ) {
             throw new \Exception( 'Invalid scrape response (' . $host . ':' . $port . ').' );
         }
 
         return $response;
+    }
+
+    /**
+     * Returns the (last) HTTP status code from a $http_response_header array.
+     *
+     * @param array $headers Raw response header lines.
+     * @return int Status code, or 0 if none found.
+     */
+    private function http_status_from_headers( $headers ) {
+        $status = 0;
+        foreach ( $headers as $line ) {
+            if ( preg_match( '#^HTTP/\S+\s+(\d{3})#', $line, $m ) ) {
+                $status = (int) $m[1];
+            }
+        }
+
+        return $status;
+    }
+
+    /**
+     * Returns the (last) value of a header from a $http_response_header array.
+     *
+     * @param array  $headers Raw response header lines.
+     * @param string $name Header name (case-insensitive).
+     * @return string Header value, or '' if absent.
+     */
+    private function http_header_value( $headers, $name ) {
+        $name = strtolower( $name );
+        $value = '';
+        foreach ( $headers as $line ) {
+            $pos = strpos( $line, ':' );
+            if ( false !== $pos && strtolower( trim( substr( $line, 0, $pos ) ) ) === $name ) {
+                $value = trim( substr( $line, $pos + 1 ) );
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * Resolves a (possibly relative) redirect Location against the current URL.
+     * Always yields an http/https URL, so a tracker can't redirect us into a
+     * different scheme (file://, gopher://, …).
+     *
+     * @param string $base Current request URL.
+     * @param string $location Raw Location header value.
+     * @return string Absolute http(s) URL.
+     */
+    private function resolve_redirect_url( $base, $location ) {
+        $location = trim( $location );
+
+        if ( preg_match( '#^https?://#i', $location ) ) {
+            return $location;
+        }
+
+        $parts = parse_url( $base );
+        $scheme = isset( $parts['scheme'] ) ? $parts['scheme'] : 'http';
+        $host = isset( $parts['host'] ) ? $parts['host'] : '';
+        $port = isset( $parts['port'] ) ? ':' . $parts['port'] : '';
+
+        // Scheme-relative ("//host/path").
+        if ( 0 === strpos( $location, '//' ) ) {
+            return $scheme . ':' . $location;
+        }
+
+        // Root-relative ("/path").
+        if ( 0 === strpos( $location, '/' ) ) {
+            return $scheme . '://' . $host . $port . $location;
+        }
+
+        // Document-relative ("path").
+        $path = isset( $parts['path'] ) ? $parts['path'] : '/';
+        $dir = substr( $path, 0, strrpos( $path, '/' ) + 1 );
+
+        return $scheme . '://' . $host . $port . $dir . $location;
     }
 
     /**
@@ -286,13 +447,21 @@ class Scraper {
         $context = stream_context_create( array(
             'http' => array(
                 'timeout' => $this->timeout,
+                // SSRF hardening (TryHackX): never follow redirects. A tracker's
+                // scrape/announce endpoint returns bencoded data directly, so a
+                // 3xx Location header is only useful to bounce the request to an
+                // internal host — which would bypass the public-host validation
+                // done up front in TrackerScraper. A redirected response won't
+                // match the expected bencode prefix and is discarded.
+                'follow_location' => 0,
+                'max_redirects' => 1,
             ),
         ));
 
         $response_data = '';
         foreach ( $infohashes as $infohash ) {
             $query = $tracker_url . '/announce?info_hash=' . urlencode( pack( 'H*', $infohash ) );
-            if ( false === ( $response = @file_get_contents( $query, false, $context ) ) ) {
+            if ( false === ( $response = @file_get_contents( $query, false, $context, 0, self::MAX_RESPONSE_BYTES ) ) ) {
                 throw new \Exception( 'Invalid announce connection (' . $host . ':' . $port . ').' );
             }
 

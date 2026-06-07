@@ -11,30 +11,25 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetCustomName;
+use Psr\Log\LoggerInterface;
 
 class RenameController implements RequestHandlerInterface
 {
-    protected SettingsRepositoryInterface $settings;
-
-    public function __construct(SettingsRepositoryInterface $settings)
-    {
-        $this->settings = $settings;
+    public function __construct(
+        protected SettingsRepositoryInterface $settings,
+        protected LoggerInterface $logger
+    ) {
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
+        $actor = RequestUtil::getActor($request);
+        // Brama „musisz być zalogowany" (idiomatyczne, formatowane przez rdzeń
+        // Flarum). UWAGA: to NIE jest autoryzacja do konkretnego magnetu —
+        // właściwą kontrolą jest sprawdzenie autorstwa posta niżej.
+        $actor->assertRegistered();
+
         try {
-            $actor = RequestUtil::getActor($request);
-
-            // Musi być zalogowany
-            if ($actor->isGuest()) {
-                return new JsonResponse([
-                    'success' => false,
-                    'error' => 'guest_not_allowed',
-                    'message' => 'You must be logged in'
-                ], 403);
-            }
-
             // Sprawdź czy funkcja jest włączona
             $renameEnabled = (bool) $this->settings->get('tryhackx-magnet-link.rename_enabled', true);
             if (!$renameEnabled) {
@@ -124,6 +119,8 @@ class RenameController implements RequestHandlerInterface
             ]);
 
         } catch (\Exception $e) {
+            $this->logger->error('[magnet-link] rename failed: ' . $e->getMessage(), ['exception' => $e]);
+
             return new JsonResponse([
                 'success' => false,
                 'error' => 'server_error',

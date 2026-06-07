@@ -10,7 +10,6 @@ namespace TryHackX\MagnetLink;
 use Flarum\Extend;
 use Flarum\Api\Resource\DiscussionResource;
 use Flarum\Api\Schema;
-use Flarum\Api\Endpoint;
 use Flarum\Api\Context;
 use Flarum\Discussion\Discussion;
 use TryHackX\MagnetLink\Api\Controller;
@@ -34,26 +33,16 @@ return [
     // Rejestracja lokalizacji
     new Extend\Locales(__DIR__ . '/resources/locale'),
 
-    // Flaga: czy pierwszy post dyskusji zawiera magnet link. Pozwala frontendowi
-    // pominąć zapytanie o tooltip dla dyskusji bez magnetów (bez dodatkowych
-    // zapytań — firstPost jest i tak dołączany do listy).
+    // Flaga: czy pierwszy post dyskusji zawiera magnet link. Czytana z
+    // zdenormalizowanej kolumny `discussions.has_magnet_links` (utrzymywanej
+    // przez Listener\SyncDiscussionMagnetFlag + backfill migracji + re-parse),
+    // dzięki czemu lista dyskusji NIE musi już dociągać pierwszego posta dla
+    // każdej dyskusji (usunięty globalny addDefaultInclude(['firstPost'])).
     (new Extend\ApiResource(DiscussionResource::class))
         ->fields(fn () => [
             Schema\Boolean::make('hasMagnetLinks')
-                ->get(function (Discussion $discussion, Context $context) {
-                    try {
-                        $firstPost = $discussion->firstPost;
-                        if (! $firstPost || $firstPost->type !== 'comment') {
-                            return false;
-                        }
-                        $xml = $firstPost->getRawOriginal('content');
-                        return is_string($xml) && stripos($xml, '<MAGNET') !== false;
-                    } catch (\Throwable $e) {
-                        return false;
-                    }
-                }),
+                ->get(fn (Discussion $discussion, Context $context) => (bool) $discussion->has_magnet_links),
         ])
-        ->endpoint(Endpoint\Index::class, fn (Endpoint\Index $endpoint) => $endpoint->addDefaultInclude(['firstPost']))
         // Discussion-list sorts by magnet-click activity (topic-scoped — counts
         // clicks made from this discussion's own posts). Consumed by
         // tryhackx/flarum-homepage-blocks' Advanced Filters, but registered here
@@ -78,7 +67,8 @@ return [
         ->post('/magnet/rename', 'magnet.rename', Controller\RenameController::class)
         ->delete('/magnet/rename', 'magnet.rename.delete', Controller\RenameController::class)
         ->get('/magnet/discussion/{discussionId}', 'magnet.discussion', Controller\DiscussionMagnetsController::class)
-        ->post('/magnet/reparse', 'magnet.reparse', Controller\ReparseController::class),
+        ->post('/magnet/reparse', 'magnet.reparse', Controller\ReparseController::class)
+        ->post('/magnet/retokenize', 'magnet.retokenize', Controller\RetokenizeController::class),
 
     // Ustawienia rozszerzenia
     (new Extend\Settings())
@@ -93,6 +83,20 @@ return [
         ->default('tryhackx-magnet-link.display_type', 'average')
         ->default('tryhackx-magnet-link.tracker_timeout', 2)
         ->default('tryhackx-magnet-link.max_trackers', 0)
+        // Liczba przekierowań HTTP do podążenia przy scrapowaniu (0 = brak; np.
+        // tracker za Cloudflare robi http→https). Każdy hop walidowany guardem SSRF.
+        ->default('tryhackx-magnet-link.scraper_max_redirects', 0)
+        // Lista priorytetowych trackerów (jeden host na linię). Jeśli magnet
+        // zawiera któryś z nich, jest odpytywany najpierw — w kolejności z listy.
+        // Czysty reorder: nie dodaje trackerów spoza magnetu; guard SSRF, filtry
+        // schematu/http_only oraz capy/budżet działają jak dotąd.
+        ->default('tryhackx-magnet-link.priority_trackers', '')
+        // Schemat tokenów + sekretny salt (Model\MagnetLink::TOKEN_SCHEME).
+        // token_scheme domyślnie 1 (legacy); migracja ustawia 2 dla świeżych
+        // instalacji, istniejące wymagają jednorazowej re-tokenizacji. token_salt
+        // jest usuwany z payloadu admina (Extend\Event niżej), żeby nie wyciekł.
+        ->default('tryhackx-magnet-link.token_scheme', 1)
+        ->default('tryhackx-magnet-link.token_salt', '')
         // Cache wyników scrapowania (serwerowy + sterujący cache frontendu).
         ->default('tryhackx-magnet-link.cache_enabled', true)
         ->default('tryhackx-magnet-link.cache_ttl', 300)
@@ -162,6 +166,19 @@ return [
             return max(0, (int) $value);
         }),
 
+    // Sekret soli tokenów NIE może wyciec do frontendu — payload admina zawiera
+    // wszystkie ustawienia (Settings::all()). Usuwamy token_salt tuż przed
+    // wysłaniem do klienta. token_scheme (nieczuły) zostaje, bo steruje
+    // widocznością przycisku re-tokenizacji w panelu.
+    (new Extend\Event())
+        ->listen(\Flarum\Settings\Event\Deserializing::class, function (\Flarum\Settings\Event\Deserializing $event) {
+            unset($event->settings['tryhackx-magnet-link.token_salt']);
+        })
+        // Utrzymanie zdenormalizowanej flagi discussions.has_magnet_links (#2),
+        // żeby lista dyskusji nie dociągała pierwszego posta dla każdej pozycji.
+        ->listen(\Flarum\Post\Event\Posted::class, \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::class)
+        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::class),
+
     // Discussion-list ordering for the magnet-click sorts. Flarum lists
     // discussions through the database Search, which orders by column name;
     // this mutator swaps in the topic-scoped click sub-query for our virtual
@@ -177,5 +194,6 @@ return [
 
     // Komenda CLI: przelicza stare posty z magnet linkami sprzed instalacji
     (new Extend\Console())
-        ->command(\TryHackX\MagnetLink\Console\ReparseMagnetsCommand::class),
+        ->command(\TryHackX\MagnetLink\Console\ReparseMagnetsCommand::class)
+        ->command(\TryHackX\MagnetLink\Console\RetokenizeMagnetsCommand::class),
 ];

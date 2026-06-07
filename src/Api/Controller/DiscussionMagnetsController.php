@@ -3,6 +3,7 @@
 namespace TryHackX\MagnetLink\Api\Controller;
 
 use Flarum\Http\RequestUtil;
+use Flarum\Discussion\Discussion;
 use Flarum\Post\Post;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Laminas\Diactoros\Response\JsonResponse;
@@ -12,15 +13,20 @@ use Psr\Http\Server\RequestHandlerInterface;
 use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetCustomName;
 use TryHackX\MagnetLink\Service\TrackerScraper;
+use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
+use Psr\Log\LoggerInterface;
 
 class DiscussionMagnetsController implements RequestHandlerInterface
 {
+    use ChecksMagnetAccess;
+
     /** Wall-clock budget (seconds) for scraping all magnets shown in one tooltip. */
     private const TOOLTIP_SCRAPE_BUDGET = 8.0;
 
     public function __construct(
         protected SettingsRepositoryInterface $settings,
-        protected TrackerScraper $scraper
+        protected TrackerScraper $scraper,
+        protected LoggerInterface $logger
     ) {
     }
 
@@ -29,34 +35,9 @@ class DiscussionMagnetsController implements RequestHandlerInterface
         try {
             $actor = RequestUtil::getActor($request);
 
-            // Sprawdź uprawnienia (identycznie jak InfoController)
-            $guestVisible = (bool) $this->settings->get('tryhackx-magnet-link.guest_visible', false);
-            $activatedOnly = (bool) $this->settings->get('tryhackx-magnet-link.activated_only', false);
-
-            if ($actor->isGuest()) {
-                if (!$guestVisible) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'guest_not_allowed',
-                        'message' => 'Guests are not allowed to view magnet links'
-                    ], 403);
-                }
-            } else {
-                if ($activatedOnly && !$actor->is_email_confirmed) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'email_not_confirmed',
-                        'message' => 'Please confirm your email to view magnet links'
-                    ], 403);
-                }
-
-                if (!$actor->can('tryhackx-magnet-link.viewMagnetLinks')) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'permission_denied',
-                        'message' => 'You do not have permission to view magnet links'
-                    ], 403);
-                }
+            // Bramka uprawnień (wspólna — patrz ChecksMagnetAccess).
+            if ($error = $this->magnetAccessError($actor)) {
+                return $error;
             }
 
             // Sprawdź czy tooltip jest włączony
@@ -94,8 +75,24 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 ], 400);
             }
 
-            // Załaduj posty dyskusji i skanuj za tagami MAGNET
-            $posts = Post::where('discussion_id', $discussionId)
+            // BEZPIECZEŃSTWO: rozwiąż dyskusję w zakresie widoczności aktora.
+            // Bez tego dowolny członek mógł zgadywać ID dyskusji i wyciągać
+            // metadane magnetów (nazwy, info-hashe, rozmiary, liczniki, a przez
+            // token też URI) z dyskusji/postów, których nie wolno mu oglądać.
+            // Niewidoczną dyskusję traktujemy jak „brak magnetów" — nie zdradzamy
+            // nawet jej istnienia.
+            if (! Discussion::whereVisibleTo($actor)->whereKey($discussionId)->exists()) {
+                return new JsonResponse([
+                    'success' => true,
+                    'discussion_id' => $discussionId,
+                    'magnets' => [],
+                ]);
+            }
+
+            // Załaduj TYLKO posty widoczne dla aktora (pomija m.in. ukryte przez
+            // moderację) i skanuj je za tagami MAGNET.
+            $posts = Post::whereVisibleTo($actor)
+                ->where('discussion_id', $discussionId)
                 ->whereNotNull('content')
                 ->where('type', 'comment')
                 ->select('id', 'content')
@@ -103,6 +100,16 @@ class DiscussionMagnetsController implements RequestHandlerInterface
 
             $magnets = [];
             $seenTokens = [];
+
+            // #3: jedno zapytanie o WSZYSTKIE własne nazwy dla postów tej dyskusji
+            // (zamiast N+1 w pętli). Mapa: "magnetId:postId" => custom_name.
+            $customNames = [];
+            $postIds = $posts->pluck('id')->all();
+            if (! empty($postIds)) {
+                foreach (MagnetCustomName::whereIn('post_id', $postIds)->get(['magnet_link_id', 'post_id', 'custom_name']) as $cn) {
+                    $customNames[$cn->magnet_link_id . ':' . $cn->post_id] = $cn->custom_name;
+                }
+            }
 
             foreach ($posts as $post) {
                 $xml = $post->content;
@@ -140,12 +147,8 @@ class DiscussionMagnetsController implements RequestHandlerInterface
 
                         $seenTokens[] = $magnetLink->token;
 
-                        // Sprawdź niestandardową nazwę dla tego magneta w tym poście
-                        $displayName = $magnetLink->name;
-                        $customName = MagnetCustomName::findForMagnetAndPost($magnetLink->id, $post->id);
-                        if ($customName) {
-                            $displayName = $customName->custom_name;
-                        }
+                        // Własna nazwa z mapy (#3 — bez N+1).
+                        $displayName = $customNames[$magnetLink->id . ':' . $post->id] ?? $magnetLink->name;
 
                         $magnetData = [
                             'token' => $magnetLink->token,
@@ -182,12 +185,8 @@ class DiscussionMagnetsController implements RequestHandlerInterface
 
                         $seenTokens[] = $token;
 
-                        // Sprawdź niestandardową nazwę dla tego magneta w tym poście
-                        $displayName = $magnetLink->name;
-                        $customName = MagnetCustomName::findForMagnetAndPost($magnetLink->id, $post->id);
-                        if ($customName) {
-                            $displayName = $customName->custom_name;
-                        }
+                        // Własna nazwa z mapy (#3 — bez N+1).
+                        $displayName = $customNames[$magnetLink->id . ':' . $post->id] ?? $magnetLink->name;
 
                         $magnetData = [
                             'token' => $magnetLink->token,
@@ -231,6 +230,8 @@ class DiscussionMagnetsController implements RequestHandlerInterface
             ]);
 
         } catch (\Exception $e) {
+            $this->logger->error('[magnet-link] discussion magnets failed: ' . $e->getMessage(), ['exception' => $e]);
+
             return new JsonResponse([
                 'success' => false,
                 'error' => 'server_error',

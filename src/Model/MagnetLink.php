@@ -3,6 +3,7 @@
 namespace TryHackX\MagnetLink\Model;
 
 use Flarum\Database\AbstractModel;
+use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Support\Str;
 
 /**
@@ -28,12 +29,42 @@ class MagnetLink extends AbstractModel
     public $timestamps = true;
 
     /**
-     * Generuj unikalny token dla magnet linka
+     * Wersja schematu tokenów (token = sha256(magnetUri + salt)).
+     *
+     * < 2 (legacy): salt = config('app.key') z PUBLICZNYM fallbackiem
+     * 'flarum-magnet-salt'. Flarum nie ustawia app.key, więc na praktycznie
+     * każdej instalacji salt był stały i publiczny — a token jest widoczny w
+     * HTML (data-token), więc dało się offline zbudować tablicę token→URI dla
+     * znanych torrentów i odzyskać magnet URI BEZ uprawnień.
+     *
+     * >= 2: salt = losowy, per-instalacja, sekret (ustawienie `token_salt`), więc
+     * token nic nie zdradza. Migracja istniejących tokenów: Service\TokenRetokenizer
+     * (komenda `magnet:retokenize` + przycisk w panelu).
+     */
+    public const TOKEN_SCHEME = 2;
+
+    /**
+     * Wyprowadź token dla magnet URI zgodnie z aktualnym schematem.
+     *
+     * Deterministyczny dla tego samego URI (dedup + stabilny identyfikator w API),
+     * ale od schematu 2 nieodwracalny bez sekretnej soli.
      */
     public static function generateToken(string $magnetUri): string
     {
-        // Używamy SHA256 z solą aby token był unikalny
-        // ale deterministyczny dla tego samego magnet linka
+        $settings = resolve(SettingsRepositoryInterface::class);
+        $scheme = (int) $settings->get('tryhackx-magnet-link.token_scheme', 1);
+
+        if ($scheme >= self::TOKEN_SCHEME) {
+            $salt = (string) $settings->get('tryhackx-magnet-link.token_salt', '');
+            if ($salt !== '') {
+                return hash('sha256', $magnetUri . $salt);
+            }
+            // Schemat deklaruje sekret, ale soli brak (nie powinno się zdarzyć) —
+            // spadamy do legacy, zamiast liczyć token z pustą solą.
+        }
+
+        // Legacy (schemat < 2): dokładnie dawne wyprowadzenie, aby tokeny sprzed
+        // re-tokenizacji nadal się zgadzały.
         return hash('sha256', $magnetUri . config('app.key', 'flarum-magnet-salt'));
     }
 

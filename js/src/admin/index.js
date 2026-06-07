@@ -151,3 +151,57 @@ app.initializers.add('tryhackx-magnet-link-display-style', () => {
         return m('div', { className: 'MagnetLink-displayStyle Form-group' }, items);
     }, 30);
 });
+
+// Przycisk „Zabezpiecz tokeny" — widoczny TYLKO gdy istniejące tokeny są na
+// starszym (publiczny salt) schemacie (token_scheme < 2). Po sukcesie schemat
+// lokalnie skacze do 2 i przycisk znika; w trakcie jest zablokowany (spinner).
+// Równoległe uruchomienia blokuje też serwer (cache lock w kontrolerze).
+app.initializers.add('tryhackx-magnet-link-retokenize', () => {
+    let running = false;
+
+    app.registry.for('tryhackx-magnet-link').registerSetting(function () {
+        const scheme = parseInt(app.data.settings['tryhackx-magnet-link.token_scheme'], 10) || 1;
+        if (scheme >= 2) return null; // już zabezpieczone — nic nie pokazuj
+
+        return m('div', { className: 'MagnetLink-retokenize Form-group' }, [
+            m('label', app.translator.trans('tryhackx-magnet-link.admin.retokenize.label')),
+            m('p', {
+                className: 'helpText',
+                style: 'padding:8px 10px;border-left:3px solid #e74c3c;background:rgba(231,76,60,0.06);border-radius:4px;',
+            }, app.translator.trans('tryhackx-magnet-link.admin.retokenize.help')),
+            m('button', {
+                className: 'Button Button--primary' + (running ? ' disabled' : ''),
+                disabled: running,
+                onclick: () => {
+                    if (running) return;
+                    running = true;
+                    m.redraw();
+
+                    app.request({
+                        method: 'POST',
+                        url: app.forum.attribute('apiUrl') + '/magnet/retokenize',
+                    })
+                        .then((res) => {
+                            // Schemat skacze do bieżącego → przycisk znika.
+                            app.data.settings['tryhackx-magnet-link.token_scheme'] = String((res && res.scheme) || 2);
+                            app.alerts.show(
+                                { type: 'success' },
+                                app.translator.trans('tryhackx-magnet-link.admin.retokenize.success', { count: (res && res.count) || 0 })
+                            );
+                        })
+                        .catch(() => {
+                            app.alerts.show({ type: 'error' }, app.translator.trans('tryhackx-magnet-link.admin.retokenize.error'));
+                        })
+                        .then(() => {
+                            running = false;
+                            m.redraw();
+                        });
+                },
+            }, [
+                m('i', { className: 'fas fa-shield-halved Button-icon icon' + (running ? ' fa-spin' : '') }),
+                ' ',
+                app.translator.trans('tryhackx-magnet-link.admin.retokenize.button'),
+            ]),
+        ]);
+    }, 95);
+});

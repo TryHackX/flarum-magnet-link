@@ -13,10 +13,12 @@ use TryHackX\MagnetLink\Model\MagnetCustomName;
 use TryHackX\MagnetLink\Service\TrackerScraper;
 use TryHackX\MagnetLink\Service\RefreshLimiter;
 use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
+use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
 
 class InfoController implements RequestHandlerInterface
 {
     use ResolvesClientIp;
+    use ChecksMagnetAccess;
 
     public function __construct(
         protected SettingsRepositoryInterface $settings,
@@ -29,43 +31,9 @@ class InfoController implements RequestHandlerInterface
     {
         $actor = RequestUtil::getActor($request);
 
-        // Sprawdź uprawnienia w kolejności:
-        // 1. Gość - czy dozwolony?
-        // 2. Użytkownik - czy ma aktywowany email (jeśli wymagane)?
-        // 3. Użytkownik - czy ma uprawnienie do przeglądania magnet linków?
-        
-        $guestVisible = (bool) $this->settings->get('tryhackx-magnet-link.guest_visible', false);
-        $activatedOnly = (bool) $this->settings->get('tryhackx-magnet-link.activated_only', false);
-        
-        // Sprawdź gościa
-        if ($actor->isGuest()) {
-            if (!$guestVisible) {
-                return new JsonResponse([
-                    'success' => false,
-                    'error' => 'guest_not_allowed',
-                    'message' => 'Guests are not allowed to view magnet links'
-                ], 403);
-            }
-        } else {
-            // Zalogowany użytkownik
-            
-            // Sprawdź aktywację email
-            if ($activatedOnly && !$actor->is_email_confirmed) {
-                return new JsonResponse([
-                    'success' => false,
-                    'error' => 'email_not_confirmed',
-                    'message' => 'Please confirm your email to view magnet links'
-                ], 403);
-            }
-            
-            // Sprawdź uprawnienie grupy
-            if (!$actor->can('tryhackx-magnet-link.viewMagnetLinks')) {
-                return new JsonResponse([
-                    'success' => false,
-                    'error' => 'permission_denied',
-                    'message' => 'You do not have permission to view magnet links'
-                ], 403);
-            }
+        // Bramka uprawnień (wspólna — patrz ChecksMagnetAccess).
+        if ($error = $this->magnetAccessError($actor)) {
+            return $error;
         }
 
         // Pobierz token z URL - różne metody

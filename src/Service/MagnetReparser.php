@@ -52,6 +52,10 @@ class MagnetReparser
                         $post->setContentAttribute($source, $post->user);
                         $post->save();
 
+                        // Po re-parsie pierwszy post może teraz mieć <MAGNET> —
+                        // zaktualizuj zdenormalizowaną flagę dyskusji (#2).
+                        \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::sync($post);
+
                         $count++;
 
                         if ($onPost) {

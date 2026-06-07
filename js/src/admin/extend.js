@@ -72,6 +72,21 @@ export default [
             max: 50,
             default: 0,
         }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.scraper_max_redirects',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_max_redirects_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_max_redirects_help', {}, true),
+            min: 0,
+            max: 5,
+            default: 0,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.priority_trackers',
+            type: 'textarea',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.priority_trackers_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.priority_trackers_help', {}, true),
+        }))
 
         // --- Cache wyników ---
         .setting(() => ({

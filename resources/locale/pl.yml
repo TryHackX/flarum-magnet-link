@@ -33,6 +33,12 @@ tryhackx-magnet-link:
             max_trackers_label: "Maksymalna liczba trackerów"
             max_trackers_help: "Maksymalna liczba trackerów odpytywanych na jeden magnet. Ustaw 0, aby użyć wbudowanego limitu bezpieczeństwa (12). Dodatkowo obowiązuje twardy budżet czasu, więc pojedynczy magnet nie zawiesi żądania."
 
+            scraper_max_redirects_label: "Maks. przekierowań trackera"
+            scraper_max_redirects_help: "Ile przekierowań HTTP(S) podążyć przy scrapowaniu trackera. Domyślnie 0 (nie podążaj). Zwiększ do 1-2, jeśli tracker jest za Cloudflare lub CDN przekierowującym http→https. Każdy hop jest nadal walidowany guardem SSRF, więc tracker nie przekieruje żądania na adres prywatny/wewnętrzny."
+
+            priority_trackers_label: "Trackery priorytetowe"
+            priority_trackers_help: "Opcjonalne. Jeden host trackera na linię (np. tracker.opentrackr.org). Jeśli magnet zawiera któryś z nich, są odpytywane najpierw, w tej kolejności — najbardziej przydatne w domyślnym trybie „zatrzymaj na pierwszym odpowiadającym”, dzięki czemu statystyki pochodzą z zaufanego trackera, a do tego poprawia się szybkość i dokładność. Tylko zmiana kolejności: trackery spoza magnetu nigdy nie są dodawane, a guard SSRF, filtry schematu/HTTP oraz limity nadal obowiązują."
+
             # Ustawienia cache
             cache_enabled_label: "Cache wyników trackerów"
             cache_enabled_help: "Buforuj statystyki seed/leech/pobrań, aby ponowne wyświetlenia i najechania na dymek nie odpytywały trackerów na nowo. Zdecydowanie zalecane — to także główna ochrona przed obciążeniem generowanym najeżdżaniem myszką. Steruje zarówno cache serwerowym, jak i przeglądarkowym."
@@ -102,6 +108,13 @@ tryhackx-magnet-link:
             button: "Przelicz stare magnet linki"
             success: "Przetworzono {count} post(ów)."
             error: "Nie udało się przeliczyć magnet linków. Sprawdź logi serwera."
+
+        retokenize:
+            label: "Bezpieczeństwo tokenów"
+            help: "Tokeny magnetów trzymają link poza źródłem strony, więc można go pobrać tylko przez API z kontrolą uprawnień. Starsze wersje wyprowadzały tokeny z publicznej, stałej soli, co pozwalało odwrócić znane torrenty offline wprost z HTML. Uruchom to raz po aktualizacji, aby zabezpieczyć każdy token sekretem unikalnym dla tej strony. Dla bardzo dużych forów użyj CLI: php flarum magnet:retokenize"
+            button: "Zabezpiecz tokeny magnetów"
+            success: "Zabezpieczono {count} token(ów)."
+            error: "Nie udało się zabezpieczyć tokenów. Sprawdź logi serwera."
 
         support:
             button: "Wesprzyj rozwój"

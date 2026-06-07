@@ -12,17 +12,19 @@ use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetClick;
 use TryHackX\MagnetLink\Model\MagnetBan;
 use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
+use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
+use Psr\Log\LoggerInterface;
 use Carbon\Carbon;
 
 class ClickController implements RequestHandlerInterface
 {
     use ResolvesClientIp;
+    use ChecksMagnetAccess;
 
-    protected SettingsRepositoryInterface $settings;
-
-    public function __construct(SettingsRepositoryInterface $settings)
-    {
-        $this->settings = $settings;
+    public function __construct(
+        protected SettingsRepositoryInterface $settings,
+        protected LoggerInterface $logger
+    ) {
     }
 
     public function handle(ServerRequestInterface $request): ResponseInterface
@@ -30,39 +32,9 @@ class ClickController implements RequestHandlerInterface
         try {
             $actor = RequestUtil::getActor($request);
 
-            // Sprawdź uprawnienia
-            $guestVisible = (bool) $this->settings->get('tryhackx-magnet-link.guest_visible', false);
-            $activatedOnly = (bool) $this->settings->get('tryhackx-magnet-link.activated_only', false);
-            
-            // Sprawdź gościa
-            if ($actor->isGuest()) {
-                if (!$guestVisible) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'guest_not_allowed',
-                        'message' => 'Guests are not allowed'
-                    ], 403);
-                }
-            } else {
-                // Zalogowany użytkownik
-                
-                // Sprawdź aktywację email
-                if ($activatedOnly && !$actor->is_email_confirmed) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'email_not_confirmed',
-                        'message' => 'Please confirm your email'
-                    ], 403);
-                }
-                
-                // Sprawdź uprawnienie grupy
-                if (!$actor->can('tryhackx-magnet-link.viewMagnetLinks')) {
-                    return new JsonResponse([
-                        'success' => false,
-                        'error' => 'permission_denied',
-                        'message' => 'You do not have permission'
-                    ], 403);
-                }
+            // Bramka uprawnień (wspólna — patrz ChecksMagnetAccess).
+            if ($error = $this->magnetAccessError($actor)) {
+                return $error;
             }
 
             // Pobierz dane z body
@@ -167,6 +139,11 @@ class ClickController implements RequestHandlerInterface
             ]);
             
         } catch (\Exception $e) {
+            // Tu trafiają tylko NIEOCZEKIWANE błędy (DB, bugi) — awarie trackerów
+            // są łapane w TrackerScraper, więc to nie zaleje logów. Logujemy, by
+            // realne błędy nie znikały po cichu na produkcji.
+            $this->logger->error('[magnet-link] click failed: ' . $e->getMessage(), ['exception' => $e]);
+
             return new JsonResponse([
                 'success' => false,
                 'error' => 'server_error',

@@ -59,6 +59,9 @@ class TrackerScraper
      */
     private const FAILURE_CACHE_TTL = 30;
 
+    /** Zmemoizowana (na czas żądania) znormalizowana lista hostów priorytetowych. */
+    private ?array $priorityHostsCache = null;
+
     public function __construct(
         protected SettingsRepositoryInterface $settings,
         protected Store $cache
@@ -122,6 +125,8 @@ class TrackerScraper
             (bool) $this->settings->get('tryhackx-magnet-link.http_only', false) ? 'http' : 'any',
             (bool) $this->settings->get('tryhackx-magnet-link.allow_private_trackers', false) ? 'priv' : 'pub',
             'm' . (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0),
+            // Lista priorytetowa zmienia „pierwszego respondera" → też w kluczu.
+            $this->priorityFingerprint(),
         ];
 
         return 'tryhackx-magnet-link.scrape.' . strtolower($magnet->info_hash) . '.' . implode('.', $parts);
@@ -157,6 +162,9 @@ class TrackerScraper
 
         $checkAll = (bool) $this->settings->get('tryhackx-magnet-link.check_all', false);
         $allowPrivate = (bool) $this->settings->get('tryhackx-magnet-link.allow_private_trackers', false);
+        // Liczba przekierowań HTTP do podążenia (np. tracker za Cloudflare robi
+        // http→https). Każdy hop i tak jest walidowany guardem SSRF (niżej).
+        $maxRedirects = max(0, min((int) $this->settings->get('tryhackx-magnet-link.scraper_max_redirects', 0), 5));
 
         // Never let one magnet run past the absolute ceiling, even if the
         // caller passed a more generous shared deadline.
@@ -193,7 +201,7 @@ class TrackerScraper
             }
             $callTimeout = max(1, (int) min($timeout, (int) ceil($remaining)));
 
-            $data = $this->scrapeSingle($infoHash, $tracker, $callTimeout);
+            $data = $this->scrapeSingle($infoHash, $tracker, $callTimeout, $maxRedirects, $allowPrivate);
             $contacted++;
 
             if ($data !== null) {
@@ -262,7 +270,104 @@ class TrackerScraper
             $candidates[] = $tracker;
         }
 
-        return $candidates;
+        return $this->prioritize($candidates);
+    }
+
+    /**
+     * Ułóż kandydatów tak, by trackery z listy priorytetowej admina były na
+     * początku (w kolejności z listy), a reszta zachowała dotychczasową
+     * kolejność. To czysty reorder istniejących trackerów — nic nie dodaje.
+     * Liczy się głównie przy check_all=false (lepszy „pierwszy responder")
+     * oraz gdy capy/budżet obetną listę (lepszy dobór odpytywanych).
+     *
+     * @param array<int, string> $candidates
+     * @return array<int, string>
+     */
+    private function prioritize(array $candidates): array
+    {
+        $priority = $this->priorityHosts();
+        if ($priority === [] || count($candidates) < 2) {
+            return $candidates;
+        }
+
+        $rank = array_flip($priority); // host => pozycja (0 = najwyższy priorytet)
+
+        $decorated = [];
+        foreach ($candidates as $i => $tracker) {
+            $host = $this->hostFromTrackerString($tracker);
+            $r = ($host !== null && isset($rank[$host])) ? $rank[$host] : PHP_INT_MAX;
+            $decorated[] = [$r, $i, $tracker]; // $i = stabilny tie-breaker
+        }
+
+        usort($decorated, static fn (array $a, array $b): int => [$a[0], $a[1]] <=> [$b[0], $b[1]]);
+
+        return array_map(static fn (array $d): string => $d[2], $decorated);
+    }
+
+    /**
+     * Znormalizowana (lowercase, bez portu/ścieżki) lista hostów z ustawienia
+     * `priority_trackers` — jeden wpis na linię. Memoizowana na czas żądania.
+     *
+     * @return array<int, string>
+     */
+    private function priorityHosts(): array
+    {
+        if ($this->priorityHostsCache !== null) {
+            return $this->priorityHostsCache;
+        }
+
+        $raw = (string) $this->settings->get('tryhackx-magnet-link.priority_trackers', '');
+        if (trim($raw) === '') {
+            return $this->priorityHostsCache = [];
+        }
+
+        $seen = [];
+        $hosts = [];
+        foreach (preg_split('/\r\n|\r|\n/', $raw) ?: [] as $line) {
+            $host = $this->hostFromTrackerString($line);
+            if ($host !== null && ! isset($seen[$host])) {
+                $seen[$host] = true;
+                $hosts[] = $host;
+                if (count($hosts) >= 200) {
+                    break; // zdrowy limit — dłuższa lista to konfiguracyjna pomyłka
+                }
+            }
+        }
+
+        return $this->priorityHostsCache = $hosts;
+    }
+
+    /**
+     * Wyciągnij sam host (lowercase, bez nawiasów IPv6) z trackera podanego
+     * jako pełny URL, host:port, host/ścieżka albo goły host.
+     */
+    private function hostFromTrackerString(string $raw): ?string
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        // parse_url potrzebuje schematu; dla gołego hosta podstawiamy "//".
+        $forParse = str_contains($raw, '://') ? $raw : '//' . ltrim($raw, '/');
+        $host = parse_url($forParse, PHP_URL_HOST);
+
+        if (! is_string($host) || $host === '') {
+            return null;
+        }
+
+        return strtolower(trim($host, '[]'));
+    }
+
+    /**
+     * Krótki odcisk listy priorytetowej do klucza cache (zmiana listy zmienia
+     * „pierwszego respondera", więc musi unieważniać cache).
+     */
+    private function priorityFingerprint(): string
+    {
+        $hosts = $this->priorityHosts();
+
+        return $hosts === [] ? 'p0' : 'p' . substr(sha1(implode(',', $hosts)), 0, 10);
     }
 
     /**
@@ -318,10 +423,17 @@ class TrackerScraper
      *
      * @return array{seeders:int, leechers:int, completed:int}|null
      */
-    private function scrapeSingle(string $infoHash, string $tracker, int $timeout): ?array
+    private function scrapeSingle(string $infoHash, string $tracker, int $timeout, int $maxRedirects = 0, bool $allowPrivate = false): ?array
     {
         try {
             $scraper = new Scraper();
+            $scraper->set_max_redirects($maxRedirects);
+            if ($maxRedirects > 0) {
+                // Waliduj KAŻDY hop przekierowania tą samą polityką co host
+                // pierwotny — pozwala na http→https (Cloudflare/CDN), ale nie
+                // pozwala przekierować scrapera na adres wewnętrzny (SSRF).
+                $scraper->set_host_validator(fn (string $host): bool => $allowPrivate || $this->hostIsPublic($host));
+            }
             $result = $scraper->scrape($infoHash, [$tracker], null, $timeout, false);
         } catch (\Throwable $e) {
             return null;

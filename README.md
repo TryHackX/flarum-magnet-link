@@ -18,7 +18,24 @@ Flarum installations:
   actively developed** — stays available for legacy installs but won't
   receive new features.
 
-> **Latest highlights (2.2.0):**
+> **Latest highlights (2.3.0):**
+> - **Restricted-discussion leak fixed** — the discussion-list tooltip endpoint
+>   now enforces per-discussion / per-post visibility, so members can't
+>   enumerate magnet metadata (or, via the token, the URI) from topics they
+>   aren't allowed to see.
+> - **Tokens re-secured** — magnet tokens now use a random, per-install secret
+>   salt (the previous fallback salt was effectively public), so a token in the
+>   page source can no longer be reversed to the magnet URI. After upgrading,
+>   run `php flarum magnet:retokenize` or click *Re-secure magnet tokens* once.
+> - **Priority trackers** — optionally list trusted tracker hosts to query first,
+>   improving stat quality and latency in the default "first responder" mode.
+> - **Configurable tracker redirects** — follow a few HTTP redirects (e.g. for a
+>   tracker behind Cloudflare), with every hop re-validated by the SSRF guard.
+> - **Lighter discussion list** — `hasMagnetLinks` is read from a denormalized
+>   column instead of eager-loading first posts, and tooltip custom-name lookups
+>   are batched into one query.
+>
+> **From 2.2.0:**
 > - **SSRF-hardened scraping** — tracker hosts come from post content, so the
 >   scraper now refuses trackers that resolve to private / loopback / reserved
 >   addresses (internal services, cloud metadata), with an admin opt-in for
@@ -144,10 +161,10 @@ Both use the same `MagnetReparser` service, which:
 ## 🔐 How it works (security)
 
 1. The user inserts `[magnet]magnet:?xt=...[/magnet]` into a post.
-2. On post save the magnet URI is validated, stored in `magnet_links`
-   and replaced in the stored XML with a unique SHA-256 token attribute.
-3. In the rendered HTML *only* the token is visible — the actual magnet
-   URI is never exposed.
+2. On post save the magnet URI is validated and stored in `magnet_links` with a
+   SHA-256 token derived from a random, **per-install secret salt**.
+3. In the rendered HTML *only* that token is exposed (`data-token`) — never the
+   magnet URI, and the secret salt means the token can't be reversed back to it.
 4. When the user clicks the link, JavaScript sends the token to
    `/api/magnet/info/{token}`.
 5. The API checks permissions (group, guest, email verification) and
@@ -157,11 +174,14 @@ Both use the same `MagnetReparser` service, which:
 **Tracker scraping safety:** a magnet's tracker URLs are attacker-controlled,
 so before contacting any tracker the server resolves its host and refuses
 private / loopback / link-local / reserved addresses (preventing the scraper
-from being used to reach internal services — SSRF). The number of trackers
-contacted per magnet and the total time spent are both capped, and results are
-cached, so scraping can't be turned into a denial-of-service vector. Click
-counting uses Flarum's resolved client IP (honouring trusted proxies) rather
-than spoofable request headers.
+from being used to reach internal services — SSRF). HTTP redirects are not
+followed unless you opt in (*Max Tracker Redirects*), and even then every hop is
+re-validated against the same host policy and only http/https targets are
+followed. The number of trackers contacted per magnet and the total time spent
+are both capped, the response size is bounded, and results are cached, so
+scraping can't be turned into a denial-of-service vector. Click counting uses
+Flarum's resolved client IP (honouring trusted proxies) rather than spoofable
+request headers.
 
 ## Screenshots
 
@@ -229,6 +249,8 @@ Go to **Admin → Extensions → Magnet Link**.
 | Display Type | Average | How to aggregate across trackers when *Check All* is on (average / average-max-downloads / max-all). |
 | Tracker Timeout | 2 s | Per-tracker (clamped to the remaining time budget). |
 | Maximum Trackers | 0 | Max trackers contacted per magnet. 0 = built-in safety cap (12); a wall-clock budget also applies. |
+| **Max Tracker Redirects** | **0** | HTTP(S) redirects to follow per tracker (0–5). 0 = don't follow. Raise to 1–2 for a tracker behind Cloudflare/CDN that redirects http→https; every hop is re-validated by the SSRF guard. |
+| **Priority Trackers** | *(empty)* | Optional, one tracker host per line. Listed hosts are queried first (in order) when a magnet contains them — better stats/latency in the default "first responder" mode. Reorder only; never adds trackers not in the magnet. |
 | **Cache Tracker Results** | **On** | Cache stats (server + browser) so repeated views / hovers don't re-query trackers. The main brake on hover-driven load. |
 | **Cache Lifetime (seconds)** | **300** | How long cached stats stay valid. 0 disables caching. |
 | **Refresh Cooldown (seconds)** | **30** | Global per-magnet cooldown for the manual refresh button. One refresh updates the shared result everyone sees; the magnet can't be re-refreshed sooner. 0 = no cooldown. Needs caching on to share the result. |
@@ -267,6 +289,7 @@ Or use the editor button to insert / wrap the selection automatically.
 | Command | Purpose |
 | --- | --- |
 | `php flarum magnet:reparse` | Re-parse posts whose `[magnet]` BBCode was saved before the extension was active. Idempotent; safe to run multiple times. |
+| `php flarum magnet:retokenize` | Re-derive all magnet tokens onto the current secret-salt scheme. Run once after upgrading from ≤ 2.2.x. Idempotent. |
 
 ## Database
 
