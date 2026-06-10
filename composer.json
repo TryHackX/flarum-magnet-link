@@ -1,20 +1,27 @@
 {
     "name": "tryhackx/flarum-magnet-link",
-    "description": "Magnet Link BBCode extension for Flarum with tracker scraping and click counting",
+    "description": "Secure magnet link integration for Flarum with SHA-256 token protection, SSRF-hardened tracker scraping, live click counters, and an optimized discussion list preview tooltip.",
     "keywords": [
         "flarum",
         "extension",
         "magnet",
         "torrent",
         "bbcode",
-        "tracker"
+        "tracker",
+        "scraper",
+        "ssrf-protection",
+        "token-security",
+        "click-counter",
+        "tooltip",
+        "backfill"
     ],
     "type": "flarum-extension",
     "license": "MIT",
     "authors": [
         {
             "name": "TryHackX",
-            "email": "contact@tryhackx.org"
+            "email": "contact@tryhackx.org",
+            "homepage": "https://github.com/TryHackX"
         }
     ],
     "support": {
@@ -23,7 +30,7 @@
     },
     "require": {
         "php": "^8.2",
-        "flarum/core": "^2.0",
+        "flarum/core": "^2.0.0-rc.1",
         "s9e/text-formatter": "^2.0"
     },
     "autoload": {
