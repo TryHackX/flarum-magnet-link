@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-06-12
+
+> Small follow-up from a second audit pass: kills an N+1 in the tooltip endpoint,
+> de-duplicates the controller's twin parsing blocks, and aligns the PHP
+> constraint with Flarum 2.x. No migration, no frontend change, no API / forum-
+> attribute change — `tryhackx/flarum-homepage-blocks` and the rest of the stack
+> are unaffected.
+
+### Performance
+- **Tooltip endpoint batch-loads magnet rows (no more N+1).** `GET
+  /api/magnet/discussion/{id}` looked up every token individually with
+  `findByToken()` inside the post loop (k posts × m magnets → up to k×m
+  queries). It now collects all tokens in a single pass and loads the rows with
+  one `whereIn('token', …)->keyBy('token')`. Custom names were already
+  bulk-loaded; magnet rows now are too.
+
+### Changed
+- **`DiscussionMagnetsController` parsing de-duplicated.** The two structurally
+  identical blocks (the `<MAGNET>uri</MAGNET>` pass and the `<MAGNET token="…"/>`
+  pass) were merged into one private `collectTokenRefs()` helper that handles
+  both tag forms in a single pass and returns the unique token/post references
+  feeding the batch load. The endpoint's output shape is unchanged (verified
+  against the previous behaviour, including cross-post dedup).
+- **`composer.json` now requires `php: ^8.3`** to match Flarum 2.x's own minimum
+  (it declared `^8.2`, which a Flarum 2.x install can never actually satisfy).
+  Metadata only — no runtime change.
+
 ## [2.4.0] - 2026-06-11
 
 > Follow-up hardening pass from a code audit: moves magnet-row creation to post

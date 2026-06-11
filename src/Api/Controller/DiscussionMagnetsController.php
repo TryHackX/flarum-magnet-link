@@ -102,9 +102,6 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 ->select('id', 'content')
                 ->get();
 
-            $magnets = [];
-            $seenTokens = [];
-
             // #3: jedno zapytanie o WSZYSTKIE własne nazwy dla postów tej dyskusji
             // (zamiast N+1 w pętli). Mapa: "magnetId:postId" => custom_name.
             $customNames = [];
@@ -115,111 +112,47 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 }
             }
 
-            foreach ($posts as $post) {
-                $xml = $post->content;
+            // Zbierz unikalne (po tokenie) referencje magnetów z obu form tagu
+            // w jednym przebiegu (audyt #4 — koniec z dwoma bliźniaczymi blokami).
+            $refs = $this->collectTokenRefs($posts);
 
-                // Szukaj tagów MAGNET w przechowywanym XML
-                if (stripos($xml, '<MAGNET') === false) {
+            // Doładuj wszystkie wiersze magnetów JEDNYM zapytaniem zamiast
+            // findByToken per token w pętli (audyt #2 — koniec z N+1).
+            $tokens = array_column($refs, 'token');
+            $models = empty($tokens)
+                ? collect()
+                : MagnetLink::whereIn('token', $tokens)->get()->keyBy('token');
+
+            $magnets = [];
+            foreach ($refs as $ref) {
+                $magnetLink = $models->get($ref['token']);
+                if (! $magnetLink) {
+                    // Wiersza brak (np. import bez re-parse) — pomijamy; render
+                    // utworzy go leniwie przy otwarciu wątku.
                     continue;
                 }
 
-                // Wyciągnij zawartość tagów MAGNET
-                if (preg_match_all('/<MAGNET[^>]*>(.*?)<\/MAGNET>/is', $xml, $matches)) {
-                    foreach ($matches[1] as $content) {
-                        // Usuń znaczniki BBCode <s> i <e>
-                        $content = preg_replace('/<s>.*?<\/s>/is', '', $content);
-                        $content = preg_replace('/<e>.*?<\/e>/is', '', $content);
-                        $content = trim($content);
+                // Własna nazwa z mapy (#3 — bez N+1).
+                $displayName = $customNames[$magnetLink->id . ':' . $ref['post_id']] ?? $magnetLink->name;
 
-                        if (empty($content)) {
-                            continue;
-                        }
+                $magnetData = [
+                    'token' => $magnetLink->token,
+                    'name' => $displayName,
+                    'info_hash' => $magnetLink->info_hash,
+                    'click_count' => $magnetLink->click_count,
+                ];
 
-                        // Zdekoduj HTML entities
-                        $magnetUri = html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                        $magnetUri = trim($magnetUri);
-
-                        // Walidacja magnet URI
-                        if (strpos($magnetUri, 'magnet:?') !== 0) {
-                            continue;
-                        }
-
-                        // Tylko-do-odczytu: token jest deterministyczny z URI, a
-                        // wiersz tworzy listener przy zapisie posta
-                        // (Listener\EnsureMagnetRecords). Żadnego INSERT-u w GET
-                        // ani wyścigu na unikalnym tokenie (audyt #6). Gdyby wiersza
-                        // wyjątkowo brakło (np. import bez re-parse), pomijamy —
-                        // render utworzy go leniwie przy otwarciu wątku.
-                        $token = MagnetLink::generateToken($magnetUri);
-                        if (in_array($token, $seenTokens, true)) {
-                            continue;
-                        }
-
-                        $magnetLink = MagnetLink::findByToken($token);
-                        if (!$magnetLink) {
-                            continue;
-                        }
-
-                        $seenTokens[] = $token;
-
-                        // Własna nazwa z mapy (#3 — bez N+1).
-                        $displayName = $customNames[$magnetLink->id . ':' . $post->id] ?? $magnetLink->name;
-
-                        $magnetData = [
-                            'token' => $magnetLink->token,
-                            'name' => $displayName,
-                            'info_hash' => $magnetLink->info_hash,
-                            'click_count' => $magnetLink->click_count,
-                        ];
-
-                        // Rozmiar pliku
-                        $fileSize = $magnetLink->getFileSize();
-                        if ($fileSize !== null) {
-                            $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
-                        }
-
-                        // Scrape odłożony do czasu obcięcia listy do limitu
-                        // tooltipa (żeby nie scrapować magnetów, które odrzucimy).
-                        $magnetData['_model'] = $magnetLink;
-
-                        $magnets[] = $magnetData;
-                    }
+                // Rozmiar pliku
+                $fileSize = $magnetLink->getFileSize();
+                if ($fileSize !== null) {
+                    $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
                 }
 
-                // Sprawdź też tagi z atrybutem token (już przetworzone)
-                if (preg_match_all('/<MAGNET\s+token="([a-f0-9]{64})"[^>]*\/>/i', $xml, $tokenMatches)) {
-                    foreach ($tokenMatches[1] as $token) {
-                        if (in_array($token, $seenTokens)) {
-                            continue;
-                        }
+                // Scrape odłożony do czasu obcięcia listy do limitu tooltipa
+                // (żeby nie scrapować magnetów, które i tak odrzucimy).
+                $magnetData['_model'] = $magnetLink;
 
-                        $magnetLink = MagnetLink::findByToken($token);
-                        if (!$magnetLink) {
-                            continue;
-                        }
-
-                        $seenTokens[] = $token;
-
-                        // Własna nazwa z mapy (#3 — bez N+1).
-                        $displayName = $customNames[$magnetLink->id . ':' . $post->id] ?? $magnetLink->name;
-
-                        $magnetData = [
-                            'token' => $magnetLink->token,
-                            'name' => $displayName,
-                            'info_hash' => $magnetLink->info_hash,
-                            'click_count' => $magnetLink->click_count,
-                        ];
-
-                        $fileSize = $magnetLink->getFileSize();
-                        if ($fileSize !== null) {
-                            $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
-                        }
-
-                        $magnetData['_model'] = $magnetLink;
-
-                        $magnets[] = $magnetData;
-                    }
-                }
+                $magnets[] = $magnetData;
             }
 
             // Ogranicz liczbę magnetów w tooltipie PRZED scrapowaniem.
@@ -253,5 +186,67 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 'message' => 'An error occurred'
             ], 500);
         }
+    }
+
+    /**
+     * Zbierz unikalne (po tokenie) referencje magnetów z postów — obie formy
+     * tagu w jednym przebiegu, w kolejności wystąpienia. Wyłącznie odczyt:
+     *   - <MAGNET>uri</MAGNET>  → token liczony deterministycznie (generateToken),
+     *   - <MAGNET token="…"/>   → token brany wprost z atrybutu.
+     *
+     * Zwraca tokeny do doładowania jednym `whereIn` (bez N+1) — patrz handle().
+     *
+     * @param iterable<\Flarum\Post\Post> $posts
+     * @return array<int, array{token: string, post_id: int}>
+     */
+    private function collectTokenRefs(iterable $posts): array
+    {
+        $seen = [];
+        $refs = [];
+
+        foreach ($posts as $post) {
+            $xml = (string) $post->content;
+            if (stripos($xml, '<MAGNET') === false) {
+                continue;
+            }
+
+            // Forma 1: <MAGNET>uri</MAGNET> (treść sprzed podmiany na token).
+            if (preg_match_all('/<MAGNET[^>]*>(.*?)<\/MAGNET>/is', $xml, $matches)) {
+                foreach ($matches[1] as $content) {
+                    // Usuń znaczniki BBCode <s> i <e>.
+                    $content = preg_replace('/<s>.*?<\/s>/is', '', $content);
+                    $content = preg_replace('/<e>.*?<\/e>/is', '', $content);
+                    $content = trim($content);
+                    if ($content === '') {
+                        continue;
+                    }
+
+                    $magnetUri = trim(html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                    if (strpos($magnetUri, 'magnet:?') !== 0) {
+                        continue;
+                    }
+
+                    $token = MagnetLink::generateToken($magnetUri);
+                    if (isset($seen[$token])) {
+                        continue;
+                    }
+                    $seen[$token] = true;
+                    $refs[] = ['token' => $token, 'post_id' => (int) $post->id];
+                }
+            }
+
+            // Forma 2: <MAGNET token="…"/> (już przetworzona).
+            if (preg_match_all('/<MAGNET\s+token="([a-f0-9]{64})"[^>]*\/>/i', $xml, $tokenMatches)) {
+                foreach ($tokenMatches[1] as $token) {
+                    if (isset($seen[$token])) {
+                        continue;
+                    }
+                    $seen[$token] = true;
+                    $refs[] = ['token' => $token, 'post_id' => (int) $post->id];
+                }
+            }
+        }
+
+        return $refs;
     }
 }
