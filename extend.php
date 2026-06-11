@@ -177,7 +177,11 @@ return [
         // Utrzymanie zdenormalizowanej flagi discussions.has_magnet_links (#2),
         // żeby lista dyskusji nie dociągała pierwszego posta dla każdej pozycji.
         ->listen(\Flarum\Post\Event\Posted::class, \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::class)
-        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::class),
+        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\SyncDiscussionMagnetFlag::class)
+        // Tworzenie wierszy magnet_links przy zapisie posta, aby render i tooltip
+        // pozostały tylko-do-odczytu (bez INSERT-u w GET / w pętli renderu).
+        ->listen(\Flarum\Post\Event\Posted::class, \TryHackX\MagnetLink\Listener\EnsureMagnetRecords::class)
+        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\EnsureMagnetRecords::class),
 
     // Discussion-list ordering for the magnet-click sorts. Flarum lists
     // discussions through the database Search, which orders by column name;

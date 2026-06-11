@@ -90,11 +90,15 @@ class DiscussionMagnetsController implements RequestHandlerInterface
             }
 
             // Załaduj TYLKO posty widoczne dla aktora (pomija m.in. ukryte przez
-            // moderację) i skanuj je za tagami MAGNET.
+            // moderację) i skanuj je za tagami MAGNET. Filtr SQL `<MAGNET` (jak w
+            // MagnetReparser) odsiewa posty bez magnetu już na poziomie bazy, więc
+            // nie ściągamy całej treści każdego posta w dyskusji tylko po to, by
+            // odrzucić ją w PHP (audyt #2).
             $posts = Post::whereVisibleTo($actor)
                 ->where('discussion_id', $discussionId)
                 ->whereNotNull('content')
                 ->where('type', 'comment')
+                ->where('content', 'like', '%<MAGNET%')
                 ->select('id', 'content')
                 ->get();
 
@@ -140,12 +144,23 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                             continue;
                         }
 
-                        $magnetLink = MagnetLink::findOrCreateFromUri($magnetUri);
-                        if (!$magnetLink || in_array($magnetLink->token, $seenTokens)) {
+                        // Tylko-do-odczytu: token jest deterministyczny z URI, a
+                        // wiersz tworzy listener przy zapisie posta
+                        // (Listener\EnsureMagnetRecords). Żadnego INSERT-u w GET
+                        // ani wyścigu na unikalnym tokenie (audyt #6). Gdyby wiersza
+                        // wyjątkowo brakło (np. import bez re-parse), pomijamy —
+                        // render utworzy go leniwie przy otwarciu wątku.
+                        $token = MagnetLink::generateToken($magnetUri);
+                        if (in_array($token, $seenTokens, true)) {
                             continue;
                         }
 
-                        $seenTokens[] = $magnetLink->token;
+                        $magnetLink = MagnetLink::findByToken($token);
+                        if (!$magnetLink) {
+                            continue;
+                        }
+
+                        $seenTokens[] = $token;
 
                         // Własna nazwa z mapy (#3 — bez N+1).
                         $displayName = $customNames[$magnetLink->id . ':' . $post->id] ?? $magnetLink->name;

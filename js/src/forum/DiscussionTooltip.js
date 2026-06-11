@@ -46,15 +46,10 @@ export default class DiscussionTooltip {
             this.hide();
         }, true);
 
-        // Ukryj przy zmianie trasy (Flarum SPA navigation)
-        if (app.history) {
-            const originalPush = History.prototype.pushState;
-            const self = this;
-            History.prototype.pushState = function () {
-                self.hide();
-                return originalPush.apply(this, arguments);
-            };
-        }
+        // Ukryj przy nawigacji wstecz/naprzód (SPA). Nawigację przez kliknięcie
+        // linku obsługuje już globalny listener 'click' powyżej, więc tu wystarczy
+        // popstate — bez monkey-patcha globalnego History.prototype.
+        window.addEventListener('popstate', () => this.hide());
     }
 
     /**
@@ -273,15 +268,27 @@ export default class DiscussionTooltip {
                 let clicksHtml = '';
                 if (magnet.click_count > 0) {
                     clicksHtml = `
-                        <div class="MagnetTooltip-stats">
-                            <span class="MagnetTooltip-clicks">
-                                <i class="fas fa-mouse-pointer"></i> ${magnet.click_count}
-                            </span>
-                        </div>
+                        <span class="MagnetTooltip-clicks">
+                            <i class="fas fa-mouse-pointer"></i> ${magnet.click_count}
+                        </span>
                     `;
                 }
 
-                statsHtml = errorHtml + clicksHtml;
+                if (errorHtml && clicksHtml) {
+                    // Komunikat o błędzie po lewej, licznik kliknięć PO PRAWEJ w tym
+                    // samym wierszu (zamiast pod spodem).
+                    statsHtml = `
+                        <div class="MagnetTooltip-info-row">
+                            ${errorHtml}
+                            ${clicksHtml}
+                        </div>
+                    `;
+                } else if (errorHtml) {
+                    statsHtml = errorHtml;
+                } else if (clicksHtml) {
+                    // Sam licznik (bez komunikatu) — jak dotąd, w wierszu statystyk.
+                    statsHtml = `<div class="MagnetTooltip-stats">${clicksHtml}</div>`;
+                }
             }
 
             return `

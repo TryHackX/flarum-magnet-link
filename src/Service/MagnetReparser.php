@@ -3,6 +3,7 @@
 namespace TryHackX\MagnetLink\Service;
 
 use Flarum\Post\CommentPost;
+use Psr\Log\LoggerInterface;
 
 /**
  * Re-parses comment posts whose magnet links were written before the Magnet
@@ -23,6 +24,10 @@ use Flarum\Post\CommentPost;
  */
 class MagnetReparser
 {
+    public function __construct(protected LoggerInterface $logger)
+    {
+    }
+
     /**
      * @param callable|null $onPost Optional callback invoked with each reparsed post.
      * @return int Number of posts that were updated.
@@ -62,7 +67,11 @@ class MagnetReparser
                             $onPost($post);
                         }
                     } catch (\Throwable $e) {
-                        // Skip this post but continue the backfill.
+                        // Skip this post but continue the backfill — log it so a
+                        // recurring reparse failure is diagnosable in production.
+                        $this->logger->warning(
+                            '[magnet-link] reparse skipped post ' . $post->id . ': ' . $e->getMessage()
+                        );
                     }
                 }
             });

@@ -10,6 +10,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-11
+
+> Follow-up hardening pass from a code audit: moves magnet-row creation to post
+> save time so the read paths (render and the tooltip endpoint) stop writing to
+> the database, filters the tooltip query at the database level, and auto-closes
+> the legacy public-salt window on upgraded installs. **One new migration**
+> (idempotent, a no-op once you're on token scheme v2). No forum attributes, sort
+> fields or `magnet_links` columns change, so `tryhackx/flarum-homepage-blocks`
+> (and the rest of the stack) keep working as-is.
+
+### Security
+- **Existing installs are auto-retokenized onto the secret-salt scheme.** The
+  2.3.0 secret-salt fix left upgraded installs on the legacy (public-fallback)
+  salt until the admin manually ran `magnet:retokenize`; until they did, every
+  *new* magnet was still tokenized with the public salt, keeping the token→URI
+  lookup brute-forceable from the page HTML for users without `viewMagnetLinks`.
+  A new migration now performs the same idempotent re-tokenization
+  (recomputed from the stored URI as `sha256(uri + secret salt)`) and flips the
+  scheme to v2 automatically. It's a **no-op** on fresh / already-retokenized
+  installs (scheme ≥ 2), only rewrites the `token` column (row ids — and thus the
+  `magnet_clicks` / `magnet_custom_names` foreign keys — are untouched), and the
+  manual `magnet:retokenize` command/button remain as a fallback.
+
+### Performance
+- **Tooltip endpoint filters magnet posts in the database.** `GET
+  /api/magnet/discussion/{id}` previously loaded `id` + full `content` for every
+  visible comment in the discussion and discarded non-magnet posts in PHP. It now
+  adds `where('content', 'like', '%<MAGNET%')` (same predicate the re-parser
+  uses), so a long thread no longer transfers every post's body on each tooltip
+  hover — only the posts that actually contain a magnet.
+
+### Changed
+- **Magnet rows are created when a post is saved, not when it is rendered.** A new
+  `Listener\EnsureMagnetRecords` (on `Posted` / `Revised`) creates the
+  `magnet_links` rows up front, so the read paths become side-effect-free:
+  - the tooltip endpoint (`GET /api/magnet/discussion/{id}`) is now **read-only** —
+    it derives the deterministic token from the URI and looks the row up
+    (`findByToken`) instead of `findOrCreateFromUri`, removing a write (and the
+    unique-token insert race) from a `GET` request;
+  - `MagnetRenderer` keeps `findOrCreateFromUri` only as a lazy self-healing
+    fallback, so composer previews and not-yet-reparsed/imported content still
+    render correctly. In the normal flow the row already exists, so render no
+    longer performs the initial `INSERT`.
+  Tokens are unchanged (deterministic from the URI), so existing posts, the
+  in-post card, and homepage-blocks' counts all keep matching.
+- **Discussion tooltip no longer monkey-patches `History.prototype`.** It hid the
+  tooltip on SPA navigation by overriding the global `pushState`; it now listens
+  for `popstate` (back/forward), while click-driven navigation is still handled by
+  the existing global `click` listener. (No behavioural change — the tooltip still
+  closes on navigation — just no global prototype patching.)
+
+### Fixed
+- **Discussion tooltip: click counter sits beside the tracker-error message,
+  not under it.** When a magnet has no live stats (e.g. *No tracker responded*)
+  but does have clicks, the click badge was rendered on its own line below the
+  message. It now shares the message's row, pushed to the right
+  (`MagnetTooltip-info-row`, flex `space-between`). The success-stats row and the
+  clicks-only case are unchanged.
+
+### Internal
+- `Service\MagnetReparser` now logs posts it skips on error (injected
+  `Psr\Log\LoggerInterface`) instead of silently swallowing the exception, so a
+  recurring reparse failure is diagnosable in production.
+
+### Migrations
+- `2026_06_11_000000_retokenize_existing_installs.php` — auto-retokenize existing
+  installs onto token scheme v2. Idempotent; a no-op when already on v2. Run
+  `php flarum migrate` after updating.
+
 ## [2.3.0] - 2026-06-06
 
 ### Added
