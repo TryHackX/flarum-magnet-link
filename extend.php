@@ -199,5 +199,6 @@ return [
     // Komenda CLI: przelicza stare posty z magnet linkami sprzed instalacji
     (new Extend\Console())
         ->command(\TryHackX\MagnetLink\Console\ReparseMagnetsCommand::class)
-        ->command(\TryHackX\MagnetLink\Console\RetokenizeMagnetsCommand::class),
+        ->command(\TryHackX\MagnetLink\Console\RetokenizeMagnetsCommand::class)
+        ->command(\TryHackX\MagnetLink\Console\PruneMagnetClicksCommand::class),
 ];

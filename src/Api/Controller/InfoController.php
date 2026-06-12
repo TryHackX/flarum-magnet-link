@@ -14,11 +14,13 @@ use TryHackX\MagnetLink\Service\TrackerScraper;
 use TryHackX\MagnetLink\Service\RefreshLimiter;
 use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
 use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
+use TryHackX\MagnetLink\Concerns\ResolvesRouteParam;
 
 class InfoController implements RequestHandlerInterface
 {
     use ResolvesClientIp;
     use ChecksMagnetAccess;
+    use ResolvesRouteParam;
 
     public function __construct(
         protected SettingsRepositoryInterface $settings,
@@ -36,23 +38,9 @@ class InfoController implements RequestHandlerInterface
             return $error;
         }
 
-        // Pobierz token z URL - różne metody
-        $token = $request->getAttribute('token');
-        
-        // Fallback: spróbuj pobrać z query params
-        if (empty($token)) {
-            $queryParams = $request->getQueryParams();
-            $token = $queryParams['token'] ?? null;
-        }
-        
-        // Fallback: spróbuj wyciągnąć z URI
-        if (empty($token)) {
-            $path = $request->getUri()->getPath();
-            if (preg_match('/\/magnet\/info\/([a-f0-9]{64})$/i', $path, $matches)) {
-                $token = $matches[1];
-            }
-        }
-        
+        // Pobierz token z trasy (query → atrybut → URI; patrz ResolvesRouteParam).
+        $token = $this->resolveRouteParam($request, 'token', '/\/magnet\/info\/([a-f0-9]{64})$/i');
+
         if (empty($token) || !preg_match('/^[a-f0-9]{64}$/i', $token)) {
             return new JsonResponse([
                 'success' => false,

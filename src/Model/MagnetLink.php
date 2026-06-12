@@ -56,15 +56,24 @@ class MagnetLink extends AbstractModel
 
         if ($scheme >= self::TOKEN_SCHEME) {
             $salt = (string) $settings->get('tryhackx-magnet-link.token_salt', '');
-            if ($salt !== '') {
-                return hash('sha256', $magnetUri . $salt);
+            if ($salt === '') {
+                // Bezpieczny schemat, ale soli brak — np. ktoś zresetował
+                // ustawienia rozszerzenia i wymazał `token_salt`. NIE wolno
+                // cofać się do publicznej, znanej stałej ('flarum-magnet-salt'):
+                // to po cichu uczyniłoby NOWE tokeny odwracalnymi (każdy mógłby
+                // offline policzyć token→URI dla znanego torrenta i obejść
+                // uprawnienie viewMagnetLinks). Zamiast tego od razu dociągamy
+                // świeżą, losową, sekretną sól i utrwalamy ją. Stare tokeny i tak
+                // przepadły wraz z solą — `magnet:retokenize` je odbuduje.
+                $salt = bin2hex(random_bytes(32));
+                $settings->set('tryhackx-magnet-link.token_salt', $salt);
             }
-            // Schemat deklaruje sekret, ale soli brak (nie powinno się zdarzyć) —
-            // spadamy do legacy, zamiast liczyć token z pustą solą.
+
+            return hash('sha256', $magnetUri . $salt);
         }
 
-        // Legacy (schemat < 2): dokładnie dawne wyprowadzenie, aby tokeny sprzed
-        // re-tokenizacji nadal się zgadzały.
+        // Legacy (schemat < 2): prawdziwie stara instalacja — zachowujemy dawne
+        // wyprowadzenie, aby tokeny sprzed sekretnej soli nadal się zgadzały.
         return hash('sha256', $magnetUri . config('app.key', 'flarum-magnet-salt'));
     }
 

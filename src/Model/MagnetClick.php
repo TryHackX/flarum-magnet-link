@@ -56,4 +56,33 @@ class MagnetClick extends AbstractModel
             ->where('click_time', '>=', Carbon::now()->subMinutes($intervalMinutes))
             ->count();
     }
+
+    /**
+     * Usuń wpisy starsze niż $cutoff — retencja logu kliknięć (opt-in,
+     * Console\PruneMagnetClicksCommand). Kasuje porcjami przez SELECT id + DELETE
+     * whereIn, żeby nie blokować tabeli jednym wielkim DELETE i być przenośnym
+     * (DELETE ... LIMIT nie jest wspierane wszędzie).
+     *
+     * Zagregowany licznik magnet_links.click_count NIE jest ruszany — sumy zostają.
+     *
+     * @return int Liczba usuniętych wierszy.
+     */
+    public static function pruneOlderThan(Carbon $cutoff, int $chunkSize = 5000): int
+    {
+        $total = 0;
+
+        do {
+            $ids = static::where('click_time', '<', $cutoff)
+                ->limit($chunkSize)
+                ->pluck('id');
+
+            if ($ids->isEmpty()) {
+                break;
+            }
+
+            $total += static::whereIn('id', $ids)->delete();
+        } while ($ids->count() === $chunkSize);
+
+        return $total;
+    }
 }

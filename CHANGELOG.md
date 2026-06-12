@@ -10,6 +10,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-06-12
+
+> Third audit pass: closes a silent token-salt regression, adds an opt-in
+> click-log retention command, and de-duplicates route-param parsing. No
+> migration, no frontend change — `tryhackx/flarum-homepage-blocks` and the rest
+> of the stack are unaffected (no API / forum-attribute / table-contract change).
+
+### Security
+- **Never fall back to the public salt on a secure-scheme install.**
+  `MagnetLink::generateToken()` dropped to the historical
+  `config('app.key', 'flarum-magnet-salt')` derivation whenever the secret
+  `token_salt` was missing — including after an admin reset the extension's
+  settings (wiping `token_salt`) while the scheme stayed at 2. Since that
+  fallback salt is a public constant, every new token would have been
+  precomputable from the post HTML, bypassing `viewMagnetLinks`. On scheme ≥ 2
+  with an empty salt it now provisions and persists a fresh random secret salt
+  instead; the legacy public derivation is reserved for genuine scheme < 2
+  installs whose pre-existing tokens must still resolve. (Tokens tied to a lost
+  salt are unrecoverable regardless — run `magnet:retokenize` to rebuild them.)
+
+### Added
+- **`magnet:prune-clicks --days=N` console command** — opt-in retention for the
+  `magnet_clicks` log. Deletes rows older than N days in portable chunks, with
+  `--dry-run` to preview the count. There is no default schedule and no default
+  retention: it runs only when you invoke it (e.g. from system cron), so nothing
+  changes unless you opt in. The denormalized `magnet_links.click_count` totals
+  are never touched. **Note:** the topic-scoped magnet-click sorts
+  (`most_magnet_clicks` etc., consumed by `tryhackx/flarum-homepage-blocks`) read
+  straight from `magnet_clicks`, so after pruning they reflect only the retained
+  window — which is exactly why pruning is a manual, operator-chosen decision
+  rather than an automatic default.
+
+### Changed
+- **Route-parameter extraction de-duplicated** into a shared
+  `Concerns\ResolvesRouteParam` trait used by `InfoController` and
+  `DiscussionMagnetsController`. Same three-source resolution (query → request
+  attribute → URI regex) as before — the working defensive fallbacks are kept,
+  just no longer copy-pasted across two controllers.
+
 ## [2.4.1] - 2026-06-12
 
 > Small follow-up from a second audit pass: kills an N+1 in the tooltip endpoint,

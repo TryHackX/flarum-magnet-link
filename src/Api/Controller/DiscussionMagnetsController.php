@@ -14,11 +14,13 @@ use TryHackX\MagnetLink\Model\MagnetLink;
 use TryHackX\MagnetLink\Model\MagnetCustomName;
 use TryHackX\MagnetLink\Service\TrackerScraper;
 use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
+use TryHackX\MagnetLink\Concerns\ResolvesRouteParam;
 use Psr\Log\LoggerInterface;
 
 class DiscussionMagnetsController implements RequestHandlerInterface
 {
     use ChecksMagnetAccess;
+    use ResolvesRouteParam;
 
     /** Wall-clock budget (seconds) for scraping all magnets shown in one tooltip. */
     private const TOOLTIP_SCRAPE_BUDGET = 8.0;
@@ -50,22 +52,9 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 ], 403);
             }
 
-            // Pobierz discussionId - w Flarum 2.x route params są mergowane do query params
-            $queryParams = $request->getQueryParams();
-            $discussionId = (int) ($queryParams['discussionId'] ?? 0);
-
-            // Fallback: spróbuj z atrybutów requestu
-            if (!$discussionId) {
-                $discussionId = (int) $request->getAttribute('discussionId');
-            }
-
-            // Fallback: wyciągnij z URI
-            if (!$discussionId) {
-                $path = $request->getUri()->getPath();
-                if (preg_match('/\/magnet\/discussion\/(\d+)/', $path, $matches)) {
-                    $discussionId = (int) $matches[1];
-                }
-            }
+            // Pobierz discussionId z trasy (query → atrybut → URI; patrz
+            // ResolvesRouteParam).
+            $discussionId = (int) ($this->resolveRouteParam($request, 'discussionId', '/\/magnet\/discussion\/(\d+)/') ?? 0);
 
             if (!$discussionId) {
                 return new JsonResponse([
