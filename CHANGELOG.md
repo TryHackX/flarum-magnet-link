@@ -10,6 +10,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.1] - 2026-06-14
+
+> Cross-extension prefix-safety pass (coordinated with topic-rating 2.4.11 /
+> homepage-blocks 2.1.12) plus two small robustness/convention fixes from an audit.
+> One additive migration (column widening). No frontend change, no API /
+> forum-attribute / table-contract change — `flarum-homepage-blocks` (which consumes
+> the click sorts) is unaffected.
+
+### Fixed
+- **The magnet-click discussion sorts are now table-prefix safe.**
+  `MagnetClicksSort::expression()` builds raw correlated sub-queries over
+  `magnet_clicks` / `posts` / `discussions`; the query builder prefixes
+  column/`orderBy` references but not raw SQL, so on an install with a configured
+  table prefix the sort referenced non-existent tables. `expression()` now takes the
+  connection's table prefix, and both call sites (`apply()` + `MagnetClicksSortMutator`)
+  pass `getTablePrefix()`. No effect on the default empty-prefix install (verified:
+  all three sorts — sum/max/last — return `200` with unchanged ordering). Mirrors the
+  same fix in topic-rating / homepage-blocks.
+
+### Changed
+- **`magnet_clicks.user_id` / `post_id` widened from INT to BIGINT** (additive
+  migration) to match Flarum 2.x core (`users.id` / `posts.id` are BIGINT). The
+  columns hold no FK constraint, so there was no error today, but a forum whose
+  user/post ids exceeded the 4-byte INT range would have overflowed them. Uses
+  `->change()` (doctrine/dbal, bundled); neither column is indexed, so the change is
+  clean. `magnet_link_id` stays INT (references this extension's own INT `magnet_links.id`).
+
+### Docs
+- README: documented the `magnet:prune-clicks` command in the CLI table and added
+  retention/cron guidance — pruning stays opt-in by design (it trims the topic-scoped
+  click-sort window, so the retention window is the operator's call; there is
+  deliberately no auto-scheduler).
+
+### Notes — audit items deliberately not changed
+- **Synchronous HTTP reparse/retokenize**: rare admin-only actions; the
+  `magnet:reparse` / `magnet:retokenize` CLI commands are the documented path for
+  large forums. A queued job gives no benefit on the default `sync` queue and would
+  drop the admin's completion feedback (202, no count).
+- **`resolve()` in `MagnetLink::generateToken()`**: a static factory woven into
+  static `findOrCreateFromUri()` (called from the formatter), where no injected
+  service is available — `resolve()` is the pragmatic pattern there. Extracting a
+  `TokenService` would mean de-static-ing the security-critical token chain (risk of
+  changing token derivation → invalidating every existing token) for a convention nit.
+- **Body-wide `MutationObserver`**: load-bearing — it initialises magnet links in raw
+  post HTML that Mithril doesn't manage; the per-insertion `querySelectorAll` is cheap
+  (no layout forced). Safely re-scoping needs SPA-nav re-attachment, which risks
+  breaking magnet rendering.
+- **Denormalising `discussion_id` onto `magnet_clicks`**: a real scale optimisation,
+  but the click sorts are opt-in and `post_id`-indexed (no baseline cost), and it
+  needs schema + backfill + listener changes — deferred.
+- **Raw `Builder` closures in newer migrations / `MagnetLinkManager.js` size**: the
+  raw-closure form is valid Flarum (rewriting applied migrations risks fresh-install
+  drift); the manager is working UI whose split is pure churn with layout risk.
+
 ## [2.5.0] - 2026-06-12
 
 > Third audit pass: closes a silent token-salt regression, adds an opt-in

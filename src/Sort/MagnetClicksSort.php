@@ -21,9 +21,9 @@ use Tobyz\JsonApiServer\Schema\Sort;
  *              (groups clicks by magnet, takes the largest group).
  *   - 'last' → most recent magnet click time in the topic.
  *
- * Implemented as correlated sub-queries in `orderByRaw`. The SQL is a fixed
- * literal (no user input is interpolated — only the validated asc/desc
- * direction), so it is injection-safe. INNER JOIN to `posts` naturally
+ * Implemented as correlated sub-queries in `orderByRaw`. The SQL interpolates
+ * only the trusted table prefix (config, never user input) and the validated
+ * asc/desc direction, so it is injection-safe. INNER JOIN to `posts` naturally
  * excludes clicks whose post was deleted.
  *
  * Plugs into Flarum's sort pipeline like `Flarum\Api\Sort\SortColumn`:
@@ -82,32 +82,40 @@ class MagnetClicksSort extends Sort
         // remains a correct fallback for any plain json-api-server listing.
         $direction = strtolower($direction) === 'asc' ? 'asc' : 'desc';
 
-        $query->orderByRaw(self::expression($this->mode).' '.$direction);
+        $prefix = method_exists($query, 'getModel') ? $query->getModel()->getConnection()->getTablePrefix() : '';
+        $query->orderByRaw(self::expression($this->mode, $prefix).' '.$direction);
     }
 
     /**
      * The correlated sub-query (topic-scoped) for a given mode. Shared with
      * MagnetClicksSortMutator so the Search path and the resource path agree.
      */
-    public static function expression(string $mode): string
+    public static function expression(string $mode, string $prefix = ''): string
     {
+        // Raw SQL is not prefixed by the query builder, so the table names carry
+        // the connection's table prefix themselves. $prefix is trusted config
+        // (configured prefix, never user input), so interpolating it is safe.
+        $clicks = $prefix . 'magnet_clicks';
+        $posts = $prefix . 'posts';
+        $discussions = $prefix . 'discussions';
+
         return match ($mode) {
             // Total magnet clicks across all magnets in the topic.
-            'sum' => '(select count(*) from magnet_clicks mc'
-                   . ' inner join posts p on p.id = mc.post_id'
-                   . ' where p.discussion_id = discussions.id)',
+            'sum' => "(select count(*) from {$clicks} mc"
+                   . " inner join {$posts} p on p.id = mc.post_id"
+                   . " where p.discussion_id = {$discussions}.id)",
 
             // Clicks of the single most-clicked magnet in the topic.
-            'max' => '(select coalesce(max(c), 0) from ('
-                   . 'select count(*) as c from magnet_clicks mc'
-                   . ' inner join posts p on p.id = mc.post_id'
-                   . ' where p.discussion_id = discussions.id'
-                   . ' group by mc.magnet_link_id) as sub)',
+            'max' => "(select coalesce(max(c), 0) from ("
+                   . "select count(*) as c from {$clicks} mc"
+                   . " inner join {$posts} p on p.id = mc.post_id"
+                   . " where p.discussion_id = {$discussions}.id"
+                   . " group by mc.magnet_link_id) as sub)",
 
             // Most recent magnet click time in the topic (NULL when none).
-            'last' => '(select max(mc.click_time) from magnet_clicks mc'
-                    . ' inner join posts p on p.id = mc.post_id'
-                    . ' where p.discussion_id = discussions.id)',
+            'last' => "(select max(mc.click_time) from {$clicks} mc"
+                    . " inner join {$posts} p on p.id = mc.post_id"
+                    . " where p.discussion_id = {$discussions}.id)",
 
             default => '0',
         };

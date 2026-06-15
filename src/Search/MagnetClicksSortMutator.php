@@ -45,9 +45,14 @@ class MagnetClicksSortMutator
             }
 
             $direction = (is_string($order) && strtolower($order) === 'asc') ? 'asc' : 'desc';
-            $expression = MagnetClicksSort::expression(self::FIELDS[$field]);
 
-            $state->getQuery()
+            $query = $state->getQuery();
+            // Raw ORDER BY must carry the table prefix itself (the builder prefixes
+            // column/orderBy refs, but not raw SQL).
+            $prefix = $query->getModel()->getConnection()->getTablePrefix();
+            $expression = MagnetClicksSort::expression(self::FIELDS[$field], $prefix);
+
+            $query
                 ->reorder()
                 ->orderByRaw($expression.' '.$direction)
                 ->orderBy('discussions.id', 'desc');

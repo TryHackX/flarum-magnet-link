@@ -290,6 +290,14 @@ Or use the editor button to insert / wrap the selection automatically.
 | --- | --- |
 | `php flarum magnet:reparse` | Re-parse posts whose `[magnet]` BBCode was saved before the extension was active. Idempotent; safe to run multiple times. |
 | `php flarum magnet:retokenize` | Re-derive all magnet tokens onto the current secret-salt scheme. Run once after upgrading from ≤ 2.2.x. Idempotent. |
+| `php flarum magnet:prune-clicks --days=N` | Delete `magnet_clicks` rows older than *N* days to bound table growth. Aggregate `click_count` totals are kept; only the per-row click history (and the topic-scoped click *sorts*' time window) is trimmed. `--dry-run` reports the count without deleting. |
+
+> **Retention is opt-in by design.** Nothing prunes `magnet_clicks` automatically —
+> the topic-scoped click sorts count from it directly, so the retention window is the
+> operator's call, not ours. On a busy tracker, wire it into your system cron, e.g.
+> `0 4 * * * php /path/to/flarum magnet:prune-clicks --days=90`. (There is deliberately
+> no built-in scheduler registration: auto-pruning would silently shrink the click-sort
+> window without the operator choosing it.)
 
 ## Database
 
