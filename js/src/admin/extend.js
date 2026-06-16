@@ -87,6 +87,12 @@ export default [
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.priority_trackers_label', {}, true),
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.priority_trackers_help', {}, true),
         }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.scraper_host_allowlist',
+            type: 'textarea',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_host_allowlist_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_host_allowlist_help', {}, true),
+        }))
 
         // --- Cache wyników ---
         .setting(() => ({

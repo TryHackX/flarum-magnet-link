@@ -38,6 +38,8 @@ tryhackx-magnet-link:
 
             priority_trackers_label: "Trackery priorytetowe"
             priority_trackers_help: "Opcjonalne. Jeden host trackera na linię (np. tracker.opentrackr.org). Jeśli magnet zawiera któryś z nich, są odpytywane najpierw, w tej kolejności — najbardziej przydatne w domyślnym trybie „zatrzymaj na pierwszym odpowiadającym”, dzięki czemu statystyki pochodzą z zaufanego trackera, a do tego poprawia się szybkość i dokładność. Tylko zmiana kolejności: trackery spoza magnetu nigdy nie są dodawane, a guard SSRF, filtry schematu/HTTP oraz limity nadal obowiązują."
+            scraper_host_allowlist_label: "Biała lista hostów trackerów (bezpieczeństwo)"
+            scraper_host_allowlist_help: "Opcjonalne. Jeden zaufany host trackera na linię. Gdy niepusta, odpytywane są WYŁĄCZNIE te hosty — trackery podane w treści posta, których nie ma na liście, są pomijane, co zamyka powierzchnię SSRF / DNS-rebinding dla trackerów podstawionych przez autora posta. Zostaw puste (domyślnie), aby odpytywać dowolny publiczny host (zachowanie jak dotąd). Guard SSRF, filtry schematu / HTTP oraz limity nadal obowiązują."
 
             # Ustawienia cache
             cache_enabled_label: "Cache wyników trackerów"

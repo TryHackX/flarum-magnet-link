@@ -1,33 +1,12 @@
 // Magnet Link Admin Styles
 
-// Dodatkowe style dla panelu admina jeśli potrzebne
-.ExtensionPage--tryhackx-magnet-link {
-    .Form-group {
-        margin-bottom: 20px;
-        
-        label {
-            font-weight: 600;
-        }
-        
-        .helpText {
-            margin-top: 5px;
-            color: var(--muted-color, #666);
-            font-size: 13px;
-        }
-    }
-    
-    // Grupowanie ustawień
-    .Form-group--heading {
-        margin-top: 30px;
-        padding-bottom: 10px;
-        border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-        
-        h3 {
-            margin: 0;
-            font-size: 16px;
-            color: var(--primary-color, #e74c3c);
-        }
-    }
+// Textarea ustawień (Priority Trackers, Tracker host allowlist) szły w trybie
+// desktop na pełną szerokość: rdzeń (ExtensionPage.less → `.ExtensionPage-settings
+// input`) ogranicza do 400px TYLKO `input`, nie `textarea`. Dociągamy textarea do
+// tej samej szerokości. Scope = realna klasa strony rozszerzenia w Flarum 2.x:
+// `{id}-Page` (= `tryhackx-magnet-link-Page`).
+.tryhackx-magnet-link-Page .ExtensionPage-settings textarea {
+    max-width: 400px;
 }
 
 .MagnetLink-support {

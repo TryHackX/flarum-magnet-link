@@ -3,7 +3,7 @@
 namespace TryHackX\MagnetLink\Service;
 
 use Flarum\Settings\SettingsRepositoryInterface;
-use Illuminate\Contracts\Cache\Store;
+use Illuminate\Contracts\Cache\Repository;
 use Scrapeer\Scraper;
 use TryHackX\MagnetLink\Model\MagnetLink;
 
@@ -62,9 +62,12 @@ class TrackerScraper
     /** Zmemoizowana (na czas żądania) znormalizowana lista hostów priorytetowych. */
     private ?array $priorityHostsCache = null;
 
+    /** Zmemoizowana znormalizowana biała lista hostów trackerów (opt-in, audyt M1). */
+    private ?array $allowlistHostsCache = null;
+
     public function __construct(
         protected SettingsRepositoryInterface $settings,
-        protected Store $cache
+        protected Repository $cache
     ) {
     }
 
@@ -127,6 +130,8 @@ class TrackerScraper
             'm' . (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0),
             // Lista priorytetowa zmienia „pierwszego respondera" → też w kluczu.
             $this->priorityFingerprint(),
+            // Biała lista zmienia KTÓRE hosty są odpytywane → też w kluczu (audyt M1).
+            $this->allowlistHosts() === [] ? 'a0' : 'a' . substr(sha1(implode(',', $this->allowlistHosts())), 0, 10),
         ];
 
         return 'tryhackx-magnet-link.scrape.' . strtolower($magnet->info_hash) . '.' . implode('.', $parts);
@@ -185,10 +190,22 @@ class TrackerScraper
             }
             $considered++;
 
+            $host = (string) parse_url($tracker, PHP_URL_HOST);
+
+            // Opcjonalna BIAŁA LISTA zaufanych hostów trackerów (audyt M1/#1): gdy
+            // ustawiona, odpytujemy WYŁĄCZNIE wskazane hosty, więc tracker podstawiony
+            // przez autora posta (wektor SSRF / DNS-rebinding) nie jest w ogóle
+            // kontaktowany. Domyślnie pusta = bez ograniczeń (zachowanie jak dotąd).
+            $allowlist = $this->allowlistHosts();
+            if ($allowlist !== [] && ! in_array(strtolower(trim($host, '[]')), $allowlist, true)) {
+                $blockedAny = true;
+                continue;
+            }
+
             // SSRF guard (resolves DNS) — kept inside the capped/timed loop so
             // a magnet stuffed with hosts can't cause unbounded resolution; the
             // accumulated time is bounded by the deadline check above.
-            if (! $allowPrivate && ! $this->hostIsPublic((string) parse_url($tracker, PHP_URL_HOST))) {
+            if (! $allowPrivate && ! $this->hostIsPublic($host)) {
                 $blockedAny = true;
                 continue;
             }
@@ -335,6 +352,42 @@ class TrackerScraper
         }
 
         return $this->priorityHostsCache = $hosts;
+    }
+
+    /**
+     * Znormalizowana BIAŁA LISTA hostów z ustawienia `scraper_host_allowlist`
+     * (jeden wpis na linię). Pusta = wyłączona (bez ograniczeń — zachowanie jak
+     * dotąd). Gdy niepusta, {@see computeScrape} odpytuje WYŁĄCZNIE te hosty —
+     * opt-in zamknięcie wektora SSRF / DNS-rebinding dla trackerów podstawionych
+     * w treści posta (audyt M1). Memoizowana na czas żądania.
+     *
+     * @return array<int, string>
+     */
+    private function allowlistHosts(): array
+    {
+        if ($this->allowlistHostsCache !== null) {
+            return $this->allowlistHostsCache;
+        }
+
+        $raw = (string) $this->settings->get('tryhackx-magnet-link.scraper_host_allowlist', '');
+        if (trim($raw) === '') {
+            return $this->allowlistHostsCache = [];
+        }
+
+        $seen = [];
+        $hosts = [];
+        foreach (preg_split('/\r\n|\r|\n/', $raw) ?: [] as $line) {
+            $host = $this->hostFromTrackerString($line);
+            if ($host !== null && ! isset($seen[$host])) {
+                $seen[$host] = true;
+                $hosts[] = $host;
+                if (count($hosts) >= 200) {
+                    break; // zdrowy limit — dłuższa lista to konfiguracyjna pomyłka
+                }
+            }
+        }
+
+        return $this->allowlistHostsCache = $hosts;
     }
 
     /**

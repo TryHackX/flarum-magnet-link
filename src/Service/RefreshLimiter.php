@@ -3,7 +3,7 @@
 namespace TryHackX\MagnetLink\Service;
 
 use Flarum\Settings\SettingsRepositoryInterface;
-use Illuminate\Contracts\Cache\Store;
+use Illuminate\Contracts\Cache\Repository;
 
 /**
  * Rate-limits the manual "refresh" of a magnet's tracker stats.
@@ -29,7 +29,7 @@ class RefreshLimiter
 {
     public function __construct(
         protected SettingsRepositoryInterface $settings,
-        protected Store $cache
+        protected Repository $cache
     ) {
     }
 

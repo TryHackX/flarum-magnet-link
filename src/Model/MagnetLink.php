@@ -114,22 +114,20 @@ class MagnetLink extends AbstractModel
 
         $token = self::generateToken($magnetUri);
 
-        // Sprawdź czy już istnieje
-        $existing = static::where('token', $token)->first();
-        if ($existing) {
-            return $existing;
-        }
-
-        // Utwórz nowy
-        $model = new static();
-        $model->token = $token;
-        $model->info_hash = $infoHash;
-        $model->magnet_uri = $magnetUri;
-        $model->name = $name ?? $infoHash;
-        $model->click_count = 0;
-        $model->save();
-
-        return $model;
+        // Atomowo: firstOrCreate radzi sobie z wyścigiem dwóch równoległych renderów
+        // tego samego NOWEGO URI — wcześniej oba przechodziły SELECT, a drugi INSERT
+        // wywalał się na unikalnym `token` (→ token „invalid"). W Laravel 11
+        // firstOrCreate domyka wyścig przez createOrFirst (INSERT → łapie kolizję →
+        // SELECT). Parytet z MagnetBan::banIp() (audyt M5).
+        return static::firstOrCreate(
+            ['token' => $token],
+            [
+                'info_hash' => $infoHash,
+                'magnet_uri' => $magnetUri,
+                'name' => $name ?? $infoHash,
+                'click_count' => 0,
+            ]
+        );
     }
 
     /**

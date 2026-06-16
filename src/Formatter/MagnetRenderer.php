@@ -20,6 +20,10 @@ class MagnetRenderer
 {
     public function __invoke(Renderer $renderer, $context, string $xml, ?ServerRequestInterface $request = null): string
     {
+        // $context (drugi argument hooka renderera Flarum) jest celowo nieużywany —
+        // przepisujemy wyłącznie XML tagów MAGNET, kontekst renderowania nie jest
+        // tu potrzebny (audyt M7).
+
         // Sprawdź czy w ogóle są tagi MAGNET
         if (stripos($xml, '<MAGNET') === false) {
             return $xml;

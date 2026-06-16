@@ -10,6 +10,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-06-16
+
+> Follow-up audit round (green check, non-blocking polish). **No migrations.**
+> PHP + frontend (admin asset rebuilt for one new setting): `composer update` +
+> `php flarum cache:clear`.
+
+### Added
+- **Opt-in tracker host allowlist (SSRF hardening).** New `scraper_host_allowlist`
+  admin setting (one trusted host per line). When non-empty, the scraper contacts
+  **only** those hosts — tracker URLs pulled from attacker-controlled post content
+  that aren't listed are skipped entirely, closing the SSRF / DNS-rebinding surface.
+  Empty (default) keeps current behaviour (any public host, still behind the SSRF
+  guard). The allowlist is part of the scrape cache key. (audit M1)
+
+### Changed
+- **`TrackerScraper` and `RefreshLimiter` now inject `Illuminate\Contracts\Cache\Repository`**
+  instead of the lower-level `…\Cache\Store`, so they use Flarum's full cache stack
+  (decorators/tags) rather than the bare primitive. (audit M4)
+
+### Fixed
+- **`MagnetLink::findOrCreateFromUri()` is now race-safe.** It did
+  `where('token')->first()` then `save()`; two concurrent renders of the same new
+  magnet could both pass the SELECT and the loser hit the unique-`token` constraint
+  (→ token rendered as 'invalid'). Replaced with `firstOrCreate()` (atomic
+  create-or-first on Laravel 11), matching the `MagnetBan::banIp()` upsert. (audit M5)
+- **Settings textareas no longer stretch the full desktop width.** Flarum core caps
+  only `input` (not `textarea`) to 400px on the extension settings page, so *Priority
+  Trackers* and the new *Tracker host allowlist* spanned edge-to-edge. Both are now
+  constrained to 400px to match the other fields, scoped to the real Flarum 2.x page
+  class (`{id}-Page`). Also dropped a stale `.ExtensionPage--{id}` admin-CSS block that
+  matched nothing in Flarum 2.x (dead code — verified 0 matches in the live DOM, so its
+  removal changes nothing).
+
+### Docs / internal
+- **`src/Scraper/NOTICE.md`** documents the vendored, hardened Scrapeer fork and its
+  **CC BY-SA 3.0** license (the rest of the extension is MIT; this subtree keeps the
+  upstream license + attribution; the fork stays in-tree on purpose). (audit M2)
+- `MagnetRenderer::__invoke()`'s unused `$context` parameter is now documented as
+  intentionally unused. (audit M7)
+
+### Notes
+- **Deliberately not changed** (documented): the residual DNS-rebinding window on the
+  *initial* connect of non-allowlisted hosts (full IP-pinning would mean patching the
+  vendored Scrapeer connect path; the new allowlist closes it opt-in, redirect hops
+  are already re-validated, and `tracker_timeout` / `scraper_max_redirects` defaults
+  stay tight — audit M1); publishing Scrapeer as a separate Composer package (it
+  carries our hardening and isn't distributed elsewhere — audit M2); the static
+  `generateToken()` `resolve()` (formatter/XSL context + salt self-heal — audit M3);
+  the body-wide `MutationObserver` (load-bearing for raw-HTML post magnets; re-scoping
+  needs SPA-nav re-attach — audit M6); and the `MagnetLinkManager.js` size (a Mithril
+  rewrite is real layout risk on a working in-post component; the concrete leaks were
+  fixed in 2.6.0 — audit M8).
+- Verified on `http://flarum.localhost/`: PHP lint clean; build OK; the discussion
+  tooltip resolves magnets through the `Repository`-injected `TrackerScraper`; with a
+  non-matching allowlist every tracker is skipped (`no_http_trackers`) while the magnet
+  still renders; `/api/discussions` 200.
+
 ## [2.6.0] - 2026-06-15
 
 > Large-forum hardening pass from a third-party audit. **One new CLI command**
