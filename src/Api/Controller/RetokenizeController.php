@@ -21,6 +21,14 @@ class RetokenizeController implements RequestHandlerInterface
 {
     private const LOCK_KEY = 'tryhackx-magnet-link.retokenize-lock';
 
+    /**
+     * Powyżej tylu magnetów odmawiamy synchronicznej re-tokenizacji na HTTP i
+     * kierujemy na CLI — blokada cache chroni przed równoległym uruchomieniem, ale
+     * NIE ogranicza czasu wykonania, więc dziesiątki tysięcy wierszy i tak zatkałyby
+     * workera ponad TTL locka (audyt #2). Próg hojny dla małych/średnich for.
+     */
+    private const HTTP_LIMIT = 5000;
+
     public function __construct(
         protected TokenRetokenizer $retokenizer,
         protected CacheRepository $cache
@@ -30,6 +38,17 @@ class RetokenizeController implements RequestHandlerInterface
     public function handle(ServerRequestInterface $request): ResponseInterface
     {
         RequestUtil::getActor($request)->assertAdmin();
+
+        // Guard skali: za dużo magnetów → CLI (idempotentne, bez limitu czasu).
+        $pending = MagnetLink::count();
+        if ($pending > self::HTTP_LIMIT) {
+            return new JsonResponse([
+                'success' => false,
+                'error' => 'too_many_use_cli',
+                'count' => $pending,
+                'message' => "Too many magnets to re-tokenize over HTTP ({$pending}). Run on the server: php flarum magnet:retokenize",
+            ], 422);
+        }
 
         // Atomowe zajęcie blokady — jeśli ktoś już re-tokenizuje, nie ruszamy.
         if (! $this->cache->add(self::LOCK_KEY, 1, 300)) {

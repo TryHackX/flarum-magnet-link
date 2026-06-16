@@ -183,6 +183,14 @@ scraping can't be turned into a denial-of-service vector. Click counting uses
 Flarum's resolved client IP (honouring trusted proxies) rather than spoofable
 request headers.
 
+**Bundled scraper library:** the BitTorrent scraping uses a **hardened in-tree fork**
+of [Scrapeer](https://github.com/medariox/scrapeer) (under `src/Scraper/`, PSR-4
+`Scrapeer\`). The fork adds a bounded response size, a configurable redirect cap and
+a host-validator hook used by the SSRF guard above. Because it is vendored rather
+than required through Composer, upstream changes are **tracked and ported by hand**
+against the upstream repository, and `composer audit` will not surface them
+automatically.
+
 ## Screenshots
 
 ![Mobile view of the discussion list across multiple TryHackX layout combinations](assets/ALL_MOBILE.png)
@@ -291,6 +299,7 @@ Or use the editor button to insert / wrap the selection automatically.
 | `php flarum magnet:reparse` | Re-parse posts whose `[magnet]` BBCode was saved before the extension was active. Idempotent; safe to run multiple times. |
 | `php flarum magnet:retokenize` | Re-derive all magnet tokens onto the current secret-salt scheme. Run once after upgrading from ≤ 2.2.x. Idempotent. |
 | `php flarum magnet:prune-clicks --days=N` | Delete `magnet_clicks` rows older than *N* days to bound table growth. Aggregate `click_count` totals are kept; only the per-row click history (and the topic-scoped click *sorts*' time window) is trimmed. `--dry-run` reports the count without deleting. |
+| `php flarum magnet:prune-bans [--minutes=N]` | Delete **expired** IP bans from `magnet_bans` (older than the ban window; defaults to the `ban_time` setting). `isBanned()` only clears expired bans lazily for IPs that get re-checked, so on a bot-targeted forum the table otherwise grows unbounded. `--dry-run` reports the count without deleting. |
 
 > **Retention is opt-in by design.** Nothing prunes `magnet_clicks` automatically —
 > the topic-scoped click sorts count from it directly, so the retention window is the
@@ -298,6 +307,10 @@ Or use the editor button to insert / wrap the selection automatically.
 > `0 4 * * * php /path/to/flarum magnet:prune-clicks --days=90`. (There is deliberately
 > no built-in scheduler registration: auto-pruning would silently shrink the click-sort
 > window without the operator choosing it.)
+>
+> `magnet:prune-bans` is the same idea for the IP-ban table, and is safe to schedule
+> freely (it only ever removes already-expired bans), e.g.
+> `0 4 * * * php /path/to/flarum magnet:prune-bans`.
 
 ## Database
 

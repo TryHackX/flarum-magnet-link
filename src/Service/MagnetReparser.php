@@ -29,6 +29,19 @@ class MagnetReparser
     }
 
     /**
+     * Ile postów czeka na re-parse (ten sam filtr co reparseAll). Używane przez
+     * kontroler HTTP do odmowy zbyt dużych przebiegów na rzecz CLI (audyt #1).
+     */
+    public function countPending(): int
+    {
+        return CommentPost::query()
+            ->where('type', 'comment')
+            ->where('content', 'like', '%[magnet]%')
+            ->where('content', 'not like', '%<MAGNET%')
+            ->count();
+    }
+
+    /**
      * @param callable|null $onPost Optional callback invoked with each reparsed post.
      * @return int Number of posts that were updated.
      */

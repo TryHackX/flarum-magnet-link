@@ -30,7 +30,15 @@ class MagnetConfigurator
         $tag = $configurator->tags->add('MAGNET');
         
         // 2. Szablon XSL - renderuje HTML
-        // Token będzie dodany przez MagnetRenderer przed renderowaniem
+        // Token będzie dodany przez MagnetRenderer przed renderowaniem.
+        //
+        // UWAGA (audyt #8): „Loading..." to TYLKO fallback dla wyłączonego JS oraz
+        // krótki błysk przed hydracją. Właściwy stan ładowania renderuje JS
+        // (MagnetLinkManager.renderLoading) i JEST tłumaczony przez
+        // app.translator.trans('…forum.loading'). Świadomie NIE wstrzykujemy tu
+        // tekstu per-locale (szablon XSL jest kompilowany raz i współdzielony, a
+        // tekst zapadłby w zapisany HTML każdego posta) ani nie zostawiamy pustego
+        // placeholdera (layout shift). Bez JS magnety i tak nie działają.
         $tag->template = '<span class="MagnetLink" data-token="{@token}">' .
             '<span class="MagnetLink-placeholder">Loading...</span>' .
         '</span>';

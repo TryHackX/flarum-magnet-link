@@ -200,5 +200,6 @@ return [
     (new Extend\Console())
         ->command(\TryHackX\MagnetLink\Console\ReparseMagnetsCommand::class)
         ->command(\TryHackX\MagnetLink\Console\RetokenizeMagnetsCommand::class)
-        ->command(\TryHackX\MagnetLink\Console\PruneMagnetClicksCommand::class),
+        ->command(\TryHackX\MagnetLink\Console\PruneMagnetClicksCommand::class)
+        ->command(\TryHackX\MagnetLink\Console\PruneMagnetBansCommand::class),
 ];

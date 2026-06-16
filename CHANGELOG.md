@@ -10,6 +10,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-06-15
+
+> Large-forum hardening pass from a third-party audit. **One new CLI command**
+> (`magnet:prune-bans`), no database migrations, no API / forum-attribute / table
+> contract change — `flarum-homepage-blocks` (which consumes the click sorts) is
+> unaffected. PHP + frontend (rebuilt `js/dist`): `composer update` +
+> `php flarum cache:clear`.
+
+### Fixed
+- **`MagnetBan::banIp()` is now an atomic upsert.** `firstOrNew()` + `save()` on the
+  unique `ip_address` column could throw a duplicate-key `QueryException` (bubbling
+  to a 500 in `ClickController`) when two requests from the same IP raced past the
+  ban check at once. Replaced with `upsert()` (INSERT … ON DUPLICATE KEY UPDATE).
+  (audit #3)
+- **Rename modal no longer leaks a global `keydown` listener.** The Escape handler
+  was detached only on Escape, so closing the modal any other way (×, Cancel,
+  backdrop, save) left a listener on `document` for the rest of the session.
+  `closeModal()` now removes it on every close path. (audit #15)
+
+### Added
+- **`php flarum magnet:prune-bans [--minutes=N]`** — bulk-deletes expired IP bans
+  from `magnet_bans`. `isBanned()` only clears expired rows lazily for IPs that get
+  re-checked, so on a bot-targeted forum the table grew unbounded. Defaults to the
+  `ban_time` window; opt-in (cron), safe to schedule (only removes already-expired
+  bans). (audit #11)
+- **Table-retention note on the settings page** pointing at `magnet:prune-clicks`
+  and `magnet:prune-bans` crons, so the opt-in retention is discoverable, not only
+  in the README. (audit #12)
+
+### Changed
+- **Admin re-parse / re-tokenize refuse oversized synchronous runs over HTTP.**
+  Above a generous row threshold each endpoint returns 422 with a "run the CLI"
+  message (surfaced by the admin button) instead of risking a mid-batch 500 /
+  worker timeout on a large forum. The console commands remain the scale path.
+  (audit #1, #2)
+- **`DiscussionMagnetsController::collectTokenRefs()` parses post XML with
+  `DOMDocument`** (regex fallback on parse failure), mirroring `MagnetRenderer`
+  instead of being regex-only. (audit #16)
+- **The in-post magnet element map is pruned.** `MagnetLinkManager.elements` now
+  drops DOM nodes detached by SPA navigation (and empty token sets) instead of
+  growing for the whole session. (audit #14)
+
+### Security
+- **`RenameController` resolves the post with `whereVisibleTo($actor)`** before the
+  author check — defense-in-depth so a post the actor can't see is indistinguishable
+  from one that doesn't exist (both `not_author`). (audit #9)
+- **SSRF docblock notes the rebinding mitigation is already the default.** The
+  audit's suggested partial mitigation (`tracker_timeout` 1–2 s,
+  `scraper_max_redirects` 0) is already the shipped default (2 s / 0). (audit #10)
+
+### Notes
+- **Deliberately not changed** (documented, not regressions): the static
+  `MagnetLink::generateToken()` `resolve()` (runs in the formatter/XSL context and
+  self-heals the salt — extracting it risks changing token derivation, audit #6);
+  the data/schema migrations using raw `Builder` (settings-data logic / `->change()`
+  / `addIndex` have no Flarum helper, and rewriting *applied* migrations risks
+  fresh-install drift, audit #5); the XSL `Loading…` placeholder (a no-JS fallback —
+  the JS loading state is already translated via `renderLoading()`, audit #8); the
+  bundled hardened Scrapeer fork (now documented in the README security section,
+  audit #7); the `LIKE '%<MAGNET%'` tooltip filter (already scoped to one
+  discussion; cross-DB tradeoff, audit #13); and the full `innerHTML` / custom-modal
+  Mithril rewrite (real layout risk on a working in-post component — only the
+  concrete listener/map leaks above were fixed, audit #14/#15).
+- Verified on `http://flarum.localhost/`: PHP lint clean; `magnet:prune-bans`
+  dry-run + real prune delete only expired rows; the discussion tooltip still
+  resolves magnets through the new DOM parser; the in-post magnet card + rename
+  modal work with no console errors; the retention note renders on the settings
+  page.
+
 ## [2.5.1] - 2026-06-14
 
 > Cross-extension prefix-safety pass (coordinated with topic-rating 2.4.11 /

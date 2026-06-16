@@ -71,8 +71,11 @@ class RenameController implements RequestHandlerInterface
                 ], 404);
             }
 
-            // Sprawdź czy post istnieje i czy użytkownik jest autorem
-            $post = Post::find($postId);
+            // Sprawdź czy post istnieje i czy użytkownik jest autorem.
+            // Zakres widoczności aktora: post niewidoczny dla niego jest
+            // nieodróżnialny od nieistniejącego (oba → 'not_author'), spójnie z
+            // IDOR-mitigacją rdzenia Flarum (audyt #9 — defense-in-depth).
+            $post = Post::whereVisibleTo($actor)->find($postId);
             if (!$post || $post->user_id !== $actor->id) {
                 return new JsonResponse([
                     'success' => false,

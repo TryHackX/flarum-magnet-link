@@ -116,6 +116,10 @@ tryhackx-magnet-link:
             success: "Zabezpieczono {count} token(ów)."
             error: "Nie udało się zabezpieczyć tokenów. Sprawdź logi serwera."
 
+        maintenance:
+            label: "Retencja tabel (duże fora)"
+            help: "Tabele magnet_clicks i magnet_bans potrafią urosnąć na ruchliwych lub atakowanych przez boty forach. Przycinanie jest opt-in z rozmysłu (sorty klików czytają magnet_clicks wprost, więc okno retencji to Twoja decyzja). Wepnij to w crona serwera, np. codziennie: php flarum magnet:prune-clicks --days=90  oraz  php flarum magnet:prune-bans"
+
         support:
             button: "Wesprzyj rozwój"
             title: "Wesprzyj tę modyfikację"

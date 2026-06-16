@@ -116,6 +116,10 @@ tryhackx-magnet-link:
             success: "Re-secured {count} magnet token(s)."
             error: "Failed to re-secure tokens. Check the server logs."
 
+        maintenance:
+            label: "Table retention (large forums)"
+            help: "magnet_clicks and magnet_bans can grow large on busy or bot-targeted forums. Pruning is opt-in by design (the topic click sorts read magnet_clicks directly, so the retention window is your call). Wire these into the server's cron, e.g. daily: php flarum magnet:prune-clicks --days=90  and  php flarum magnet:prune-bans"
+
         support:
             button: Support Development
             title: Support This Extension

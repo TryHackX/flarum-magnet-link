@@ -48,11 +48,18 @@ export default class MagnetLinkManager {
             return;
         }
 
-        // Zapisz element do mapy
+        // Zapisz element do mapy (potrzebne do aktualizacji licznika klików dla
+        // wszystkich kart z danym tokenem). Przy okazji wymiataj elementy odłączone
+        // od DOM po nawigacji SPA, żeby Mapa nie rosła bez końca przez całą sesję
+        // (audyt #14 — wcześniej nigdy nie była czyszczona).
         if (!this.elements.has(token)) {
             this.elements.set(token, new Set());
         }
-        this.elements.get(token).add(element);
+        const tokenElements = this.elements.get(token);
+        for (const el of tokenElements) {
+            if (!el.isConnected) tokenElements.delete(el);
+        }
+        tokenElements.add(element);
 
         // Sprawdź uprawnienia gościa po stronie klienta
         if (app.session.user === null && !app.forum.attribute('magnetGuestVisible')) {
@@ -540,8 +547,17 @@ export default class MagnetLinkManager {
         const input = overlay.querySelector('.MagnetRenameModal-input');
         setTimeout(() => input.focus(), 50);
 
-        // Zamknij modal
-        const closeModal = () => overlay.remove();
+        // Zamknij modal — globalny listener Escape sprzątamy NIEZALEŻNIE od drogi
+        // zamknięcia (przycisk × / Anuluj / klik w tło / zapis / Escape). Wcześniej
+        // listener znikał tylko przy Escape, więc każde inne zamknięcie go wyciekało
+        // na document przez całą sesję (audyt #15).
+        const escHandler = (e) => {
+            if (e.key === 'Escape') closeModal();
+        };
+        const closeModal = () => {
+            document.removeEventListener('keydown', escHandler);
+            overlay.remove();
+        };
 
         overlay.querySelector('.MagnetRenameModal-close').addEventListener('click', closeModal);
         overlay.querySelector('.MagnetRenameModal-cancel').addEventListener('click', closeModal);
@@ -549,13 +565,6 @@ export default class MagnetLinkManager {
             if (e.target === overlay) closeModal();
         });
 
-        // Escape zamyka modal
-        const escHandler = (e) => {
-            if (e.key === 'Escape') {
-                closeModal();
-                document.removeEventListener('keydown', escHandler);
-            }
-        };
         document.addEventListener('keydown', escHandler);
 
         // Zapisz nową nazwę
@@ -619,6 +628,11 @@ export default class MagnetLinkManager {
         if (!elements) return;
 
         elements.forEach((el) => {
+            // Element odłączony od DOM (nawigacja SPA) — usuń z mapy i pomiń (audyt #14).
+            if (!el.isConnected) {
+                elements.delete(el);
+                return;
+            }
             const clicksSpan = el.querySelector('.MagnetLink-clicks span');
             if (clicksSpan) {
                 clicksSpan.textContent = count;
@@ -632,6 +646,9 @@ export default class MagnetLinkManager {
                 }
             }
         });
+
+        // Po wymieceniu odłączonych elementów nie trzymaj pustego zbioru/klucza.
+        if (elements.size === 0) this.elements.delete(token);
     }
 
     /**

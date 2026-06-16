@@ -381,7 +381,9 @@ class TrackerScraper
      * Scrapeer re-resolves at fetch time) is not covered. Fully closing that
      * would require pinning the resolved IP through the request, which the
      * BitTorrent scrape path (Host header / TLS SNI / UDP connect) does not
-     * allow cleanly.
+     * allow cleanly. The window is already narrowed by the conservative defaults
+     * the audit floated as the partial mitigation — `tracker_timeout` defaults to
+     * 2 s and `scraper_max_redirects` to 0 (audyt #10).
      */
     private function hostIsPublic(string $host): bool
     {

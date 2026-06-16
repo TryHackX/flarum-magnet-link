@@ -83,6 +83,10 @@ class DiscussionMagnetsController implements RequestHandlerInterface
             // MagnetReparser) odsiewa posty bez magnetu już na poziomie bazy, więc
             // nie ściągamy całej treści każdego posta w dyskusji tylko po to, by
             // odrzucić ją w PHP (audyt #2).
+            // UWAGA (audyt #13): `LIKE '%<MAGNET%'` ma wiodący wildcard → nie użyje
+            // indeksu B-tree na `content`. Jest jednak zawężony do JEDNEJ dyskusji
+            // (`discussion_id`) + typu + widoczności, więc skan obejmuje garstkę
+            // postów. Świadomy tradeoff cross-DB (FULLTEXT/MATCH byłby MySQL-only).
             $posts = Post::whereVisibleTo($actor)
                 ->where('discussion_id', $discussionId)
                 ->whereNotNull('content')
@@ -198,44 +202,96 @@ class DiscussionMagnetsController implements RequestHandlerInterface
             if (stripos($xml, '<MAGNET') === false) {
                 continue;
             }
+            $postId = (int) $post->id;
 
-            // Forma 1: <MAGNET>uri</MAGNET> (treść sprzed podmiany na token).
-            if (preg_match_all('/<MAGNET[^>]*>(.*?)<\/MAGNET>/is', $xml, $matches)) {
-                foreach ($matches[1] as $content) {
-                    // Usuń znaczniki BBCode <s> i <e>.
-                    $content = preg_replace('/<s>.*?<\/s>/is', '', $content);
-                    $content = preg_replace('/<e>.*?<\/e>/is', '', $content);
-                    $content = trim($content);
-                    if ($content === '') {
-                        continue;
-                    }
-
-                    $magnetUri = trim(html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                    if (strpos($magnetUri, 'magnet:?') !== 0) {
-                        continue;
-                    }
-
-                    $token = MagnetLink::generateToken($magnetUri);
-                    if (isset($seen[$token])) {
-                        continue;
-                    }
-                    $seen[$token] = true;
-                    $refs[] = ['token' => $token, 'post_id' => (int) $post->id];
-                }
+            // DOM-first, spójnie z MagnetRenderer (audyt #16): bezpiecznie obsługuje
+            // zagnieżdżenia/encje, których ad-hoc regex mógłby nie ogarnąć. Regex
+            // zostaje jako fallback, gdy XML się nie sparsuje (zachowuje dawne
+            // zachowanie).
+            $dom = new \DOMDocument('1.0', 'UTF-8');
+            $loaded = @$dom->loadXML('<root>' . $xml . '</root>', LIBXML_NOERROR | LIBXML_NOWARNING);
+            if (! $loaded) {
+                $this->collectTokenRefsRegex($xml, $postId, $seen, $refs);
+                continue;
             }
 
-            // Forma 2: <MAGNET token="…"/> (już przetworzona).
-            if (preg_match_all('/<MAGNET\s+token="([a-f0-9]{64})"[^>]*\/>/i', $xml, $tokenMatches)) {
-                foreach ($tokenMatches[1] as $token) {
-                    if (isset($seen[$token])) {
-                        continue;
-                    }
-                    $seen[$token] = true;
-                    $refs[] = ['token' => $token, 'post_id' => (int) $post->id];
+            foreach ($dom->getElementsByTagName('MAGNET') as $tag) {
+                // Forma 2: <MAGNET token="…"/> — token wprost z atrybutu.
+                $attrToken = $tag->getAttribute('token');
+                if (preg_match('/^[a-f0-9]{64}$/i', $attrToken)) {
+                    $this->addRef($attrToken, $postId, $seen, $refs);
+                    continue;
                 }
+
+                // Forma 1: <MAGNET>uri</MAGNET> — policz token z URI.
+                $magnetUri = trim(html_entity_decode($this->magnetTagContent($tag), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                if (strpos($magnetUri, 'magnet:?') !== 0) {
+                    continue;
+                }
+                $this->addRef(MagnetLink::generateToken($magnetUri), $postId, $seen, $refs);
             }
         }
 
         return $refs;
+    }
+
+    /** Dodaj referencję tokena, dedupując po tokenie (kolejność wystąpienia). */
+    private function addRef(string $token, int $postId, array &$seen, array &$refs): void
+    {
+        if (isset($seen[$token])) {
+            return;
+        }
+        $seen[$token] = true;
+        $refs[] = ['token' => $token, 'post_id' => $postId];
+    }
+
+    /**
+     * Tekst tagu MAGNET z pominięciem markerów BBCode <s>/<e> — lustro
+     * {@see \TryHackX\MagnetLink\Formatter\MagnetRenderer::getTagContent()}.
+     */
+    private function magnetTagContent(\DOMElement $tag): string
+    {
+        $content = '';
+        foreach ($tag->childNodes as $child) {
+            if ($child->nodeType === XML_ELEMENT_NODE) {
+                $name = strtolower($child->nodeName);
+                if ($name === 's' || $name === 'e') {
+                    continue;
+                }
+            }
+            $content .= $child->textContent;
+        }
+        return trim($content);
+    }
+
+    /**
+     * Fallback regexowy (gdy DOMDocument nie sparsuje XML-a) — dawne zachowanie:
+     * obie formy tagu, z usunięciem markerów BBCode <s>/<e>.
+     */
+    private function collectTokenRefsRegex(string $xml, int $postId, array &$seen, array &$refs): void
+    {
+        // Forma 1: <MAGNET>uri</MAGNET>.
+        if (preg_match_all('/<MAGNET[^>]*>(.*?)<\/MAGNET>/is', $xml, $matches)) {
+            foreach ($matches[1] as $content) {
+                $content = preg_replace('/<s>.*?<\/s>/is', '', $content);
+                $content = preg_replace('/<e>.*?<\/e>/is', '', $content);
+                $content = trim($content);
+                if ($content === '') {
+                    continue;
+                }
+                $magnetUri = trim(html_entity_decode($content, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                if (strpos($magnetUri, 'magnet:?') !== 0) {
+                    continue;
+                }
+                $this->addRef(MagnetLink::generateToken($magnetUri), $postId, $seen, $refs);
+            }
+        }
+
+        // Forma 2: <MAGNET token="…"/>.
+        if (preg_match_all('/<MAGNET\s+token="([a-f0-9]{64})"[^>]*\/>/i', $xml, $tokenMatches)) {
+            foreach ($tokenMatches[1] as $token) {
+                $this->addRef($token, $postId, $seen, $refs);
+            }
+        }
     }
 }

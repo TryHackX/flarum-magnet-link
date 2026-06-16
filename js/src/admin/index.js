@@ -69,8 +69,11 @@ app.initializers.add('tryhackx-magnet-link-reparse', () => {
                                 app.translator.trans('tryhackx-magnet-link.admin.reparse.success', { count: (res && res.count) || 0 })
                             );
                         })
-                        .catch(() => {
-                            app.alerts.show({ type: 'error' }, app.translator.trans('tryhackx-magnet-link.admin.reparse.error'));
+                        .catch((e) => {
+                            // Guard skali zwraca 422 z czytelnym message („użyj CLI") —
+                            // pokaż go zamiast generycznego błędu, gdy jest dostępny.
+                            const msg = e && e.response && e.response.message;
+                            app.alerts.show({ type: 'error' }, msg || app.translator.trans('tryhackx-magnet-link.admin.reparse.error'));
                         })
                         .then(() => {
                             reparsing = false;
@@ -84,6 +87,19 @@ app.initializers.add('tryhackx-magnet-link-reparse', () => {
             ]),
         ]);
     });
+});
+
+// Notka o retencji tabel (audyt #12): magnet_clicks i magnet_bans potrafią urosnąć
+// na ruchliwych / atakowanych przez boty forach. Przycinanie jest OPT-IN z rozmysłu
+// (sorty klików czytają magnet_clicks wprost, więc okno retencji to decyzja
+// operatora). Pokazujemy zalecane komendy crona wprost na stronie ustawień.
+app.initializers.add('tryhackx-magnet-link-maintenance', () => {
+    app.registry.for('tryhackx-magnet-link').registerSetting(function () {
+        return m('div', { className: 'MagnetLink-maintenance Form-group' }, [
+            m('label', app.translator.trans('tryhackx-magnet-link.admin.maintenance.label')),
+            m('p', { className: 'helpText' }, app.translator.trans('tryhackx-magnet-link.admin.maintenance.help')),
+        ]);
+    }, 15); // niski priorytet — blok informacyjny na dole sekcji
 });
 
 // Reaktywna grupa ustawień wyglądu karty:
@@ -189,8 +205,9 @@ app.initializers.add('tryhackx-magnet-link-retokenize', () => {
                                 app.translator.trans('tryhackx-magnet-link.admin.retokenize.success', { count: (res && res.count) || 0 })
                             );
                         })
-                        .catch(() => {
-                            app.alerts.show({ type: 'error' }, app.translator.trans('tryhackx-magnet-link.admin.retokenize.error'));
+                        .catch((e) => {
+                            const msg = e && e.response && e.response.message;
+                            app.alerts.show({ type: 'error' }, msg || app.translator.trans('tryhackx-magnet-link.admin.retokenize.error'));
                         })
                         .then(() => {
                             running = false;
