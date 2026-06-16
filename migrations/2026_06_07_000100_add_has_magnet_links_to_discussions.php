@@ -12,6 +12,13 @@ use Illuminate\Database\Schema\Builder;
  *
  * Kept in sync by Listener\SyncDiscussionMagnetFlag (Posted/Revised events) and
  * the re-parser; this migration backfills the current state in one statement.
+ *
+ * Raw Builder is deliberate: this adds a column WITH a named index AND runs a data
+ * backfill — neither maps to a Flarum\Database\Migration helper. Blueprint and the
+ * query builder already normalise across MySQL/PostgreSQL/SQLite (the helper is just
+ * a wrapper over them), so this is cross-DB safe. It is not rewritten to the helper
+ * form because changing an already-applied migration risks schema drift between fresh
+ * and upgraded installs.
  */
 return [
     'up' => function (Builder $schema) {

@@ -120,4 +120,36 @@ class MagnetClicksSort extends Sort
             default => '0',
         };
     }
+
+    /**
+     * Pre-agregowana wersja {@see expression()} do LEFT JOIN: jeden wiersz na
+     * discussion_id (kolumna thx_did) z metryką (thx_metric), policzona RAZ dla całej
+     * listy zamiast korelowanego podzapytania per wiersz (audyt #4: N×1 → jedna
+     * agregacja). Liczy nadal wprost z magnet_clicks, więc magnet:prune-clicks dalej
+     * zawęża okno sortu (zachowana semantyka retencji). Surowy SQL: prefiks tabel
+     * wstrzykiwany (zaufany config), nazwy kolumn wynikowych (thx_*) są nasze.
+     */
+    public static function aggregateExpression(string $mode, string $prefix = ''): string
+    {
+        $clicks = $prefix . 'magnet_clicks';
+        $posts = $prefix . 'posts';
+
+        return match ($mode) {
+            'sum' => "select p.discussion_id as thx_did, count(*) as thx_metric"
+                   . " from {$clicks} mc inner join {$posts} p on p.id = mc.post_id"
+                   . " group by p.discussion_id",
+
+            'max' => "select did as thx_did, coalesce(max(c), 0) as thx_metric from ("
+                   . "select p.discussion_id as did, count(*) as c"
+                   . " from {$clicks} mc inner join {$posts} p on p.id = mc.post_id"
+                   . " group by p.discussion_id, mc.magnet_link_id) as sub"
+                   . " group by did",
+
+            'last' => "select p.discussion_id as thx_did, max(mc.click_time) as thx_metric"
+                    . " from {$clicks} mc inner join {$posts} p on p.id = mc.post_id"
+                    . " group by p.discussion_id",
+
+            default => "select null as thx_did, null as thx_metric where 1 = 0",
+        };
+    }
 }

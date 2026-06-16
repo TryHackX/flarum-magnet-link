@@ -3,6 +3,7 @@
 namespace TryHackX\MagnetLink\Api\Controller;
 
 use Flarum\Http\RequestUtil;
+use Flarum\Post\Post;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
@@ -60,6 +61,17 @@ class ClickController implements RequestHandlerInterface
                     'error' => 'not_found',
                     'message' => 'Magnet link not found'
                 ], 404);
+            }
+
+            // Walidacja post_id (audyt #1): atrybutuj klik tylko do posta WIDOCZNEGO
+            // dla aktora. $body['post_id'] jest sterowane przez klienta — bez tej
+            // kontroli dowolny zalogowany user mógł podać losowe id i przypisywać kliki
+            // do cudzych / ukrytych dyskusji, zawyżając sorty MagnetClicksSort (sum/max)
+            // dla tematów, których nie wolno mu oglądać. Niewidoczny / nieistniejący
+            // post → null (klik nadal liczony dla magnetu, tylko bez atrybucji).
+            if ($postId !== null) {
+                $visiblePost = Post::whereVisibleTo($actor)->find($postId);
+                $postId = $visiblePost ? (int) $visiblePost->id : null;
             }
 
             // Pobierz IP klienta

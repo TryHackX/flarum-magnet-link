@@ -10,6 +10,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.2] - 2026-06-17
+
+> Audit follow-up — closes the click-attribution gap and de-correlates the
+> magnet-click sort for scale. **No migrations, no frontend change** (PHP only):
+> `composer update` + `php flarum cache:clear`.
+
+### Security
+- **`ClickController` now validates `post_id` against the actor's visibility.**
+  The endpoint stored the client-supplied `post_id` verbatim, so any authenticated
+  user could attribute their magnet click to an arbitrary post — including posts in
+  discussions they can't see — inflating `MagnetClicksSort` totals. It now resolves
+  the post with `Post::whereVisibleTo($actor)->find()` and stores `null` when the
+  post is missing or not visible (the click is still counted for the magnet, just not
+  attributed). (audit #1)
+
+### Performance
+- **`MagnetClicksSort` no longer runs a correlated sub-query per discussion row.**
+  The discussion-list sorts (`magnetClicksTotal` / `magnetClicksMax` /
+  `magnetLastClicked`) now use a single pre-aggregated `LEFT JOIN` (grouped by
+  `discussion_id`) computed once per page, instead of one correlated sub-query per
+  row (the SQL-level N×1). It still reads from `magnet_clicks`, so
+  `magnet:prune-clicks` keeps shrinking the sort window (semantics unchanged), and
+  the discussion search's `select discussions.*` keeps the joined columns out of
+  model hydration. Verified the per-discussion values and the resulting order are
+  identical to the old correlated form. (audit #4)
+
+### Fixed
+- Removed an unused `Illuminate\Support\Str` import in `MagnetLink`. (audit #5)
+
+### Notes
+- **Deliberately not changed** (now documented inline): the three newer migrations
+  keep raw `Builder` — they do settings data logic / a named index + backfill / a
+  `->change()` widening, none of which map to a `Flarum\Database\Migration` helper,
+  and they already run through Blueprint / the query builder (Laravel's own cross-DB
+  layer — so the PostgreSQL/SQLite concern does not apply); rewriting an
+  already-applied migration would risk schema drift between fresh and upgraded
+  installs (audit #2). The static `generateToken()` `resolve()` (formatter/XSL
+  context + salt self-heal, audit #3) and the in-tree hardened Scrapeer fork
+  (CC BY-SA 3.0, `src/Scraper/NOTICE.md`, audit #6) also stay as-is.
+- Verified on `http://flarum.localhost/`: PHP lint clean; a click with a fabricated
+  `post_id` is stored as `NULL` (never the bogus id) through the CSRF-protected
+  endpoint; the three magnet sorts return 200 with ordering byte-identical to the
+  correlated version (per-discussion values compared row-by-row in SQL);
+  `/api/discussions` 200.
+
 ## [2.6.1] - 2026-06-16
 
 > Follow-up audit round (green check, non-blocking polish). **No migrations.**

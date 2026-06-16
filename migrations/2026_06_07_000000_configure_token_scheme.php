@@ -20,6 +20,10 @@ use Illuminate\Database\Schema\Builder;
  *    to 1 (legacy), so existing tokens keep resolving while the admin is
  *    prompted to run the one-off re-tokenization (CLI `magnet:retokenize` or the
  *    settings button), which flips the scheme to 2.
+ *
+ * Raw Builder is deliberate: this is data logic on the `settings` table
+ * (insert-if-absent), not a schema change — the Migration helpers cover schema, not
+ * data. The operations go through the query builder, so they are cross-DB.
  */
 return [
     'up' => function (Builder $schema) {

@@ -4,7 +4,6 @@ namespace TryHackX\MagnetLink\Model;
 
 use Flarum\Database\AbstractModel;
 use Flarum\Settings\SettingsRepositoryInterface;
-use Illuminate\Support\Str;
 
 /**
  * @property int $id
