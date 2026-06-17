@@ -10,6 +10,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-06-17
+
+> Floxum audit follow-up (green 87/100). Closes the remaining `post_id` IDOR in the
+> info endpoint, tightens the synchronous tooltip scrape budget, and trims the global
+> MutationObserver. **Frontend change, no migrations** — rebuild assets:
+> `composer update` + `php flarum assets:publish` + `php flarum cache:clear`.
+
+### Security
+- **`InfoController` now validates `post_id` against the actor's visibility.** The
+  custom-name lookup used the client-supplied `post_id` verbatim, so a user with
+  `viewMagnetLinks` could enumerate custom names for posts they can't see (hidden /
+  moderated) by guessing the id. It now resolves the post with
+  `Post::whereVisibleTo($actor)->find()` and falls back to "no post context" when the
+  post is missing or not visible — mirroring the `ClickController` fix from 2.6.2. (floxum)
+
+### Performance
+- **Tooltip scrape budget cut from 8 s to 4 s.** `DiscussionMagnetsController`'s
+  `TOOLTIP_SCRAPE_BUDGET` bounds the synchronous tracker scraping that runs on a
+  discussion-list hover. Halving it caps how long one cold hover can hold a PHP-FPM
+  worker; the result cache still means only the first hover per magnet pays, and the
+  in-topic view (full budget) keeps the complete data. (floxum)
+- **The magnet `MutationObserver` now bails on leaf nodes before scanning.** Attached
+  to `document.body` (subtree), it fired a `querySelectorAll` on every node added
+  anywhere in the SPA; it now skips childless non-magnet nodes first. Deliberately
+  *not* rescoped to `.App-content` — magnets also render in the composer preview /
+  modals outside it. (floxum)
+
+### Notes
+- **Deliberately deferred:** moving the synchronous tooltip scrape to a queued job —
+  the result cache plus the shorter budget already bound the cost, and a real queue
+  driver (not `sync`) is needed for it to help at scale.
+- **Deliberately unchanged** (documented): the vendored Scrapeer fork (must carry the
+  local SSRF/limit hardening; baseline v0.5.4); `MagnetLink::generateToken()` stays
+  static (changing the hash would invalidate every existing token); `magnet_links.id`
+  stays INT (internal FK parity; widening is a heavy table rebuild for no practical
+  gain); the documented DNS-rebinding residual (opt-in `scraper_host_allowlist` closes
+  it). (floxum)
+
 ## [2.6.2] - 2026-06-17
 
 > Audit follow-up — closes the click-attribution gap and de-correlates the

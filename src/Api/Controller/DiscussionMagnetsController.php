@@ -22,8 +22,16 @@ class DiscussionMagnetsController implements RequestHandlerInterface
     use ChecksMagnetAccess;
     use ResolvesRouteParam;
 
-    /** Wall-clock budget (seconds) for scraping all magnets shown in one tooltip. */
-    private const TOOLTIP_SCRAPE_BUDGET = 8.0;
+    /**
+     * Wall-clock budget (seconds) for scraping ALL magnets shown in one tooltip.
+     * Trzymany krótko, bo scrape biegnie SYNCHRONICZNIE na workerze PHP-FPM przy
+     * najechaniu myszką (audyt: synchroniczny scraping wiąże workera). Zimny hover
+     * zajmie workera najwyżej na tyle sekund; cache (cache_ttl) sprawia, że płaci
+     * to tylko PIERWSZY hover dla danego magnetu. Pełny zestaw danych ma i tak
+     * widok w temacie (InfoController — bez współdzielonego deadline, własny
+     * HARD_TIME_BUDGET), więc skrócenie budżetu tooltipa nie psuje dokładności.
+     */
+    private const TOOLTIP_SCRAPE_BUDGET = 4.0;
 
     public function __construct(
         protected SettingsRepositoryInterface $settings,

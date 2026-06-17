@@ -3,6 +3,7 @@
 namespace TryHackX\MagnetLink\Api\Controller;
 
 use Flarum\Http\RequestUtil;
+use Flarum\Post\Post;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Laminas\Diactoros\Response\JsonResponse;
 use Psr\Http\Message\ResponseInterface;
@@ -72,6 +73,17 @@ class InfoController implements RequestHandlerInterface
         // Sprawdź niestandardową nazwę jeśli podano post_id
         $queryParams = $request->getQueryParams();
         $postId = isset($queryParams['post_id']) ? (int) $queryParams['post_id'] : null;
+
+        // BEZPIECZEŃSTWO (audyt IDOR): rozwiąż post_id TYLKO w zakresie widoczności
+        // aktora — $queryParams['post_id'] jest sterowane przez klienta. Bez tego
+        // user z uprawnieniem viewMagnetLinks mógł podać zgadnięte id ukrytego/
+        // moderowanego posta i wyciągnąć dla niego custom-name. Spójne z atrybucją
+        // kliknięć w ClickController. Niewidoczny/nieistniejący post → null (po
+        // prostu brak custom_name w odpowiedzi, bez zdradzania istnienia posta).
+        if ($postId !== null) {
+            $visiblePost = Post::whereVisibleTo($actor)->find($postId);
+            $postId = $visiblePost ? (int) $visiblePost->id : null;
+        }
 
         if ($postId) {
             $customName = MagnetCustomName::findForMagnetAndPost($magnetLink->id, $postId);

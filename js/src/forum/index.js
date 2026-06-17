@@ -120,6 +120,14 @@ app.initializers.add('tryhackx-magnet-link', () => {
             mutations.forEach((mutation) => {
                 mutation.addedNodes.forEach((node) => {
                     if (node.nodeType === Node.ELEMENT_NODE) {
+                        // Tani odcień przed pełnym skanem poddrzewa: obserwator jest
+                        // podpięty pod document.body (subtree:true), więc callback biegnie
+                        // na KAŻDY dodany węzeł w całym SPA (audyt: narzut przy dużym
+                        // churnie DOM). Węzeł-liść, który nie jest sam magnetem, nie ma
+                        // czego skanować — pomijamy, zanim ruszymy querySelectorAll.
+                        // (Świadomie NIE przepinamy obserwatora na .App-content: magnety
+                        // renderują się też w podglądzie kompozytora / modalach poza nim.)
+                        if (!node.childElementCount && !node.classList?.contains('MagnetLink')) return;
                         const magnetElements = node.querySelectorAll?.('.MagnetLink:not([data-initialized])') || [];
                         if (magnetElements.length) applyMagnetDisplaySettings();
                         magnetElements.forEach((el) => {
