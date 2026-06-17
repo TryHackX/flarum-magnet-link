@@ -91,6 +91,11 @@ return [
         // Czysty reorder: nie dodaje trackerów spoza magnetu; guard SSRF, filtry
         // schematu/http_only oraz capy/budżet działają jak dotąd.
         ->default('tryhackx-magnet-link.priority_trackers', '')
+        // Opt-in BIAŁA LISTA hostów trackerów (jeden host na linię). Niepusta →
+        // scrapujemy WYŁĄCZNIE wskazane hosty (zamyka SSRF/DNS-rebinding dla trackerów
+        // z treści posta). Pusta = bez ograniczeń. Pole UI jest w panelu admina
+        // (admin/extend.js) — rejestrujemy też default dla spójności (audyt M5).
+        ->default('tryhackx-magnet-link.scraper_host_allowlist', '')
         // Schemat tokenów + sekretny salt (Model\MagnetLink::TOKEN_SCHEME).
         // token_scheme domyślnie 1 (legacy); migracja ustawia 2 dla świeżych
         // instalacji, istniejące wymagają jednorazowej re-tokenizacji. token_salt

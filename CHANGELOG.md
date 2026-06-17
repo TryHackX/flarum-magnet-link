@@ -10,6 +10,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.1] - 2026-06-17
+
+> Floxum audit (runda 2) — rejestruje brakujący default białej listy hostów trackerów,
+> by opt-in guard SSRF był w pełni okablowany. Pozostałe findings rundy 2 są świadome
+> i udokumentowane niżej. **PHP only, bez migracji, bez zmian frontendu** →
+> `composer update` + `php flarum cache:clear`.
+
+### Fixed
+- **`scraper_host_allowlist` ma teraz zarejestrowany `->default('')`** w extend.php,
+  obok `priority_trackers`. Pole UI istniało już od 2.6.1 — to domyka brak rejestracji
+  defaultu, dla spójności z resztą ustawień. (floxum: brak `->default()` allowlisty)
+
+### Notes — świadomie odłożone (udokumentowane)
+- **`MagnetRenderer` może zrobić INSERT dla starych postów przy renderze.** To celowy
+  lazy self-heal dla postów sprzed backfillu `EnsureMagnetRecords`; przejście na
+  read-only regresowałoby render starych postów (pokazywałyby „invalid" do czasu
+  `magnet:reparse`). Zostaje; `EnsureMagnetRecords` pozostaje główną ścieżką zapisu.
+  (floxum: zapisy DB podczas renderu)
+- **`generateToken()` utrwala świeży `token_salt`, gdy jest pusty.** Migracja
+  provisionuje salt przy instalacji, więc ta gałąź to bezpiecznik na ręczne skasowanie;
+  okno TOCTOU jest znikome, a self-heal jest lepszy niż wywracanie derywacji tokenu.
+  Zostaje. (floxum: zapis ustawień w generateToken)
+- Bez zmian (jak dotąd): synchroniczny scraping tooltipa (kolejka odłożona — sterownik
+  `sync`, cache łagodzi zimne trafienia), statyczny `generateToken` (hash MUSI zostać
+  bajtowo identyczny), surowa migracja `->change()`, body-wide MutationObserver
+  (leaf-skip dodany w 2.7.0; rescope zepsułby magnety w podglądzie kompozytora/modalach),
+  czysty JS. (floxum: powtórki)
+
 ## [2.7.0] - 2026-06-17
 
 > Floxum audit follow-up (green 87/100). Closes the remaining `post_id` IDOR in the
