@@ -12,6 +12,11 @@ tryhackx-magnet-link:
             scraper_enabled_label: "Włącz skrobanie trackerów"
             scraper_enabled_help: "Po włączeniu rozszerzenie będzie odpytywać trackery o statystyki seed/leech/pobrań. Po wyłączeniu wyświetlana będzie tylko nazwa torrenta i licznik kliknięć."
 
+            scraper_engine_label: "Silnik scrapera"
+            scraper_engine_help: "Klasyczny = oryginalny scraper (domyślny, bez zmiany zachowania). Utwardzony = pinuje rozwiązane IP, zamykając lukę SSRF/DNS-rebinding, i dodaje obsługę IPv6 dla trackerów UDP. Utwardzony ściśle weryfikuje certyfikaty TLS, więc trackery z zepsutym/self-signed certem mogą przestać odpowiadać."
+            scraper_engine_classic: "Klasyczny (kompatybilny)"
+            scraper_engine_hardened: "Utwardzony (pinowanie IP, IPv6, ścisły TLS)"
+
             http_only_label: "Tylko trackery HTTP(S)"
             http_only_help: "Odpytuj tylko trackery HTTP i HTTPS. Włącz, jeśli Twój dostawca hostingu nie zezwala na połączenia UDP."
 

@@ -1,0 +1,1022 @@
+<?php
+/**
+ * Scrapeer, a tiny PHP library that lets you scrape
+ * HTTP(S) and UDP trackers for torrent information.
+ *
+ * This file is extensively based on Johannes Zinnau's
+ * work, which can be found at https://goo.gl/7hyjde
+ *
+ * Licensed under a Creative Commons
+ * Attribution-ShareAlike 3.0 Unported License
+ * http://creativecommons.org/licenses/by-sa/3.0
+ *
+ * @package Scrapeer
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * TryHackX HARDENED scraper ("via-fix") — bezpieczniejszy wariant {@see Scraper}.
+ * Autoładowany jako `Scrapeer\ScraperViaFix` (PSR-4). Wybierany przez admina
+ * ustawieniem `tryhackx-magnet-link.scraper_engine = 'hardened'` (domyślnie 'classic'
+ * = oryginalny Scraper). Wpięty w TrackerScraper::scrapeSingle. Zamyka DNS-rebinding
+ * przez PINOWANIE IP i dodaje obsługę IPv6 dla UDP.
+ *
+ * Różnice względem Scraper.php:
+ *   1. resolve_pinned_ip(): host rozwiązywany RAZ (A + AAAA), walidowany zakresowo
+ *      (NO_PRIV_RANGE|NO_RES_RANGE) i ZWRACANY jako konkretne IP — to SAMO IP, które
+ *      przeszło kontrolę, jest użyte do POŁĄCZENIA. Brak drugiego zapytania DNS =
+ *      brak okna rebindingu. set_allow_private(true) = opt-in admina (allow_private_trackers).
+ *   2. UDP: socket_connect do zpinowanego IP + dual-stack (AF_INET6 dla IPv6;
+ *      oryginał miał AF_INET = tylko IPv4).
+ *   3. HTTP/HTTPS (po TCP): połączenie do zpinowanego IP, ale nagłówek Host oraz TLS
+ *      SNI/weryfikacja certyfikatu nadal na ORYGINALNĄ nazwę (peer_name) — wirtualne
+ *      hosty i HTTPS działają, a połączenie nie trafi po cichu na adres wewnętrzny.
+ *      Każdy hop redirectu pinowany osobno.
+ *
+ * Kompromisy (świadome): verify_peer=true → trackery z zepsutym/self-signed certem
+ * przestają odpowiadać; pinujemy pierwsze publiczne IP (brak systemowego failoveru na
+ * kolejne). Drobne usztywnienia z audytu AI: random_peer_id przez CSPRNG (random_int),
+ * str_starts_with zamiast substr. Świadomie POMINIĘTE jako ryzykowne na vendored forku:
+ * przepisanie HTTP na cURL/CURLOPT_RESOLVE, przepisanie parsera bencode, model wyjątków,
+ * strict_types/wholesale modernizacja (różnice składniowe vs upstream).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+namespace Scrapeer;
+
+/**
+ * Hardened ("via-fix") wariant {@see Scraper} — patrz nagłówek pliku.
+ */
+class ScraperViaFix {
+
+    /**
+     * Current version of Scrapeer
+     *
+     * @var string
+     */
+    const VERSION = '0.5.4';
+
+    /**
+     * Max bytes read from an HTTP(S) tracker response (TryHackX hardening).
+     * Scrape/announce responses are tiny; capping the read prevents a malicious
+     * tracker from exhausting PHP's memory by returning a huge body.
+     *
+     * @var int
+     */
+    const MAX_RESPONSE_BYTES = 65536;
+
+    /**
+     * Array of errors
+     *
+     * @var array
+     */
+    private $errors = array();
+
+    /**
+     * Array of infohashes to scrape
+     *
+     * @var array
+     */
+    private $infohashes = array();
+
+    /**
+     * Timeout for a single tracker
+     *
+     * @var int
+     */
+    private $timeout;
+
+    /**
+     * Max number of HTTP(S) redirects to follow (TryHackX). 0 = none (safe
+     * default). Each hop is re-validated by {@see $host_validator}.
+     *
+     * @var int
+     */
+    private $max_redirects = 0;
+
+    /**
+     * Optional callable(string $host): bool deciding whether a redirect target
+     * host is allowed — the SSRF guard for redirect hops. Null = allow any.
+     *
+     * @var callable|null
+     */
+    private $host_validator = null;
+
+    /**
+     * Gdy true — pomiń kontrolę zakresową publicznego IP (opt-in admina:
+     * allow_private_trackers). Pinowanie nadal działa (host rozwiązany RAZ), ale
+     * dopuszczamy adresy prywatne/zarezerwowane.
+     *
+     * @var bool
+     */
+    private $allow_private = false;
+
+    /**
+     * Sets the maximum number of HTTP(S) redirects to follow per request.
+     *
+     * @param int $max Maximum redirects (clamped to >= 0).
+     */
+    public function set_max_redirects( $max ) {
+        $this->max_redirects = max( 0, (int) $max );
+    }
+
+    /**
+     * Sets a per-hop redirect host validator (SSRF guard for redirects).
+     *
+     * @param callable|null $validator function(string $host): bool
+     */
+    public function set_host_validator( $validator ) {
+        $this->host_validator = $validator;
+    }
+
+    /**
+     * Pozwól łączyć się z prywatnymi/zarezerwowanymi IP (opt-in admina
+     * `allow_private_trackers`). Domyślnie false (blokuj prywatne/zarezerwowane).
+     *
+     * @param bool $allow
+     */
+    public function set_allow_private( $allow ) {
+        $this->allow_private = (bool) $allow;
+    }
+
+    /**
+     * Rozwiąż $host do JEDNEGO publicznego, routowalnego IP („pin"), użytego do
+     * faktycznego połączenia — TO SAMO rozwiązanie, które przechodzi kontrolę
+     * zakresową, więc nie ma okna na DNS-rebinding. Dual-stack: sprawdza A (IPv4)
+     * i AAAA (IPv6). Zwraca null, gdy host się nie rozwiązuje albo którykolwiek
+     * adres jest prywatny/zarezerwowany (chyba że allow_private = true).
+     *
+     * @param string $host Nazwa hosta lub literał IP.
+     * @return string|null Zpinowane IP albo null (zablokowany/nierozwiązywalny).
+     */
+    private function resolve_pinned_ip( $host ) {
+        $host = trim( $host, '[]' ); // zdejmij nawiasy literału IPv6
+
+        // Literał IP: waliduj wprost, bez DNS.
+        if ( false !== filter_var( $host, FILTER_VALIDATE_IP ) ) {
+            return ( $this->allow_private || $this->ip_is_public( $host ) ) ? $host : null;
+        }
+
+        $ips = array();
+        $v4 = @gethostbynamel( $host );
+        if ( is_array( $v4 ) ) {
+            $ips = $v4;
+        }
+        $aaaa = @dns_get_record( $host, DNS_AAAA );
+        if ( is_array( $aaaa ) ) {
+            foreach ( $aaaa as $rec ) {
+                if ( ! empty( $rec['ipv6'] ) ) {
+                    $ips[] = $rec['ipv6'];
+                }
+            }
+        }
+
+        if ( empty( $ips ) ) {
+            return null; // martwy host
+        }
+
+        if ( $this->allow_private ) {
+            return $ips[0]; // admin dopuścił prywatne — pinuj pierwsze rozwiązane IP
+        }
+
+        // Odrzuć, jeśli KTÓRYKOLWIEK adres jest prywatny/zarezerwowany (parytet z dawnym
+        // hostIsPublic), a następnie ZPINUJ pierwszy publiczny do połączenia.
+        $pinned = null;
+        foreach ( $ips as $ip ) {
+            if ( ! $this->ip_is_public( $ip ) ) {
+                return null;
+            }
+            if ( null === $pinned ) {
+                $pinned = $ip;
+            }
+        }
+
+        return $pinned;
+    }
+
+    /**
+     * True, gdy $ip jest publiczny i routowalny (nie prywatny/zarezerwowany), v4 lub v6.
+     *
+     * @param string $ip
+     * @return bool
+     */
+    private function ip_is_public( $ip ) {
+        return false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE );
+    }
+
+    /**
+     * Initiates the scraper
+     *
+     * @throws \RangeException In case of invalid amount of info-hashes.
+     *
+     * @param array|string $hashes List (>1) or string of infohash(es).
+     * @param array|string $trackers List (>1) or string of tracker(s).
+     * @param int|null     $max_trackers Optional. Maximum number of trackers to be scraped, Default all.
+     * @param int          $timeout Optional. Maximum time for each tracker scrape in seconds, Default 2.
+     * @param bool         $announce Optional. Use announce instead of scrape, Default false.
+     * @return array List of results.
+     */
+    public function scrape( $hashes, $trackers, $max_trackers = null, $timeout = 2, $announce = false ) {
+        $final_result = array();
+
+        if ( empty( $trackers ) ) {
+            $this->errors[] = 'No tracker specified, aborting.';
+            return $final_result;
+        } else if ( ! is_array( $trackers ) ) {
+            $trackers = array( $trackers );
+        }
+
+        if ( is_int( $timeout ) ) {
+            $this->timeout = $timeout;
+        } else {
+            $this->timeout = 2;
+            $this->errors[] = 'Timeout must be an integer. Using default value.';
+        }
+
+        try {
+            $this->infohashes = $this->normalize_infohashes( $hashes );
+        } catch ( \RangeException $e ) {
+            $this->errors[] = $e->getMessage();
+            return $final_result;
+        }
+
+        $max_iterations = is_int( $max_trackers ) ? $max_trackers : count( $trackers );
+        foreach ( $trackers as $index => $tracker ) {
+            if ( ! empty( $this->infohashes ) && $index < $max_iterations ) {
+                $info = parse_url( $tracker );
+                $protocol = $info['scheme'];
+                $host = $info['host'];
+                if ( empty( $protocol ) || empty( $host ) ) {
+                    $this->errors[] = 'Skipping invalid tracker (' . $tracker . ').';
+                    continue;
+                }
+
+                $port = isset( $info['port'] ) ? $info['port'] : null;
+                $path = isset( $info['path'] ) ? $info['path'] : null;
+                $passkey = $this->get_passkey( $path );
+                $result = $this->try_scrape( $protocol, $host, $port, $passkey, $announce );
+                $final_result = array_merge( $final_result, $result );
+                continue;
+            }
+            break;
+        }
+        return $final_result;
+    }
+
+    /**
+     * Normalizes the given hashes
+     *
+     * @throws \RangeException If amount of valid infohashes > 64 or < 1.
+     *
+     * @param array $infohashes List of infohash(es).
+     * @return array Normalized infohash(es).
+     */
+    private function normalize_infohashes( $infohashes ) {
+        if ( ! is_array( $infohashes ) ) {
+            $infohashes = array( $infohashes );
+        }
+
+        foreach ( $infohashes as $index => $infohash ) {
+            if ( ! preg_match( '/^[a-f0-9]{40}$/i', $infohash ) ) {
+                $this->errors[] = 'Invalid infohash skipped (' . $infohash . ').';
+                unset( $infohashes[ $index ] );
+            }
+        }
+
+        $total_infohashes = count( $infohashes );
+        if ( $total_infohashes > 64 || $total_infohashes < 1 ) {
+            throw new \RangeException( 'Invalid amount of valid infohashes (' . $total_infohashes . ').' );
+        }
+
+        $infohashes = array_values( $infohashes );
+
+        return $infohashes;
+    }
+
+    /**
+     * Returns the passkey found in the scrape request.
+     *
+     * @param string $path Path from the scrape request.
+     * @return string Passkey or empty string.
+     */
+    private function get_passkey( $path ) {
+        if ( ! is_null( $path ) && preg_match( '/[a-z0-9]{32}/i', $path, $matches ) ) {
+            return '/' . $matches[0];
+        }
+
+        return '';
+    }
+
+    /**
+     * Tries to scrape with a single tracker.
+     *
+     * @throws \Exception In case of unsupported protocol.
+     *
+     * @param string $protocol Protocol of the tracker.
+     * @param string $host Domain or address of the tracker.
+     * @param int    $port Optional. Port number of the tracker.
+     * @param string $passkey Optional. Passkey provided in the scrape request.
+     * @param bool   $announce Optional. Use announce instead of scrape, Default false.
+     * @return array List of results.
+     */
+    private function try_scrape( $protocol, $host, $port, $passkey, $announce ) {
+        $infohashes = $this->infohashes;
+        $this->infohashes = array();
+        $results = array();
+        try {
+            switch ( $protocol ) {
+                case 'udp':
+                    $port = isset( $port ) ? $port : 80;
+                    $results = $this->scrape_udp( $infohashes, $host, $port, $announce );
+                    break;
+                case 'http':
+                    $port = isset( $port ) ? $port : 80;
+                    $results = $this->scrape_http( $infohashes, $protocol, $host, $port, $passkey, $announce );
+                    break;
+                case 'https':
+                    $port = isset( $port ) ? $port : 443;
+                    $results = $this->scrape_http( $infohashes, $protocol, $host, $port, $passkey, $announce );
+                    break;
+                default:
+                    throw new \Exception( 'Unsupported protocol (' . $protocol . '://' . $host . ').' );
+            }
+        } catch ( \Exception $e ) {
+            $this->infohashes = $infohashes;
+            $this->errors[] = $e->getMessage();
+        }
+        return $results;
+    }
+
+    /**
+     * Initiates the HTTP(S) scraping
+     *
+     * @param array|string $infohashes List (>1) or string of infohash(es).
+     * @param string       $protocol Protocol to use for the scraping.
+     * @param string       $host Domain or IP address of the tracker.
+     * @param int          $port Optional. Port number of the tracker, Default 80 (HTTP) or 443 (HTTPS).
+     * @param string       $passkey Optional. Passkey provided in the scrape request.
+     * @param bool         $announce Optional. Use announce instead of scrape, Default false.
+     * @return array List of results.
+     */
+    private function scrape_http( $infohashes, $protocol, $host, $port, $passkey, $announce ) {
+        if ( true === $announce ) {
+            $response = $this->http_announce( $infohashes, $protocol, $host, $port, $passkey );
+        } else {
+            $query = $this->http_query( $infohashes, $protocol, $host, $port, $passkey );
+            $response = $this->http_request( $query, $host, $port );
+        }
+        $results = $this->http_data( $response, $infohashes, $host );
+
+        return $results;
+    }
+
+    /**
+     * Builds the HTTP(S) query
+     *
+     * @param array|string $infohashes List (>1) or string of infohash(es).
+     * @param string       $protocol Protocol to use for the scraping.
+     * @param string       $host Domain or IP address of the tracker.
+     * @param int          $port Port number of the tracker, Default 80 (HTTP) or 443 (HTTPS).
+     * @param string       $passkey Optional. Passkey provided in the scrape request.
+     * @return string Request query.
+     */
+    private function http_query( $infohashes, $protocol, $host, $port, $passkey ) {
+        $tracker_url = $protocol . '://' . $host . ':' . $port . $passkey;
+        $scrape_query = '';
+
+        foreach ( $infohashes as $index => $infohash ) {
+            if ( $index > 0 ) {
+                $scrape_query .= '&info_hash=' . urlencode( pack( 'H*', $infohash ) );
+            } else {
+                $scrape_query .= '/scrape?info_hash=' . urlencode( pack( 'H*', $infohash ) );
+            }
+        }
+        $request_query = $tracker_url . $scrape_query;
+
+        return $request_query;
+    }
+
+    /**
+     * Zbuduj „zpinowane" żądanie HTTP(S) dla $url: rozwiąż host RAZ, zwaliduj zakres IP
+     * i podmień host w URL na to IP, a nazwę wirtualnego hosta oraz TLS SNI/cert ustaw
+     * na ORYGINALNĄ nazwę. WSPÓLNE dla http_request (scrape) i http_announce — dzięki
+     * temu ŻADNA ścieżka HTTP nie omija pinowania (audyt: http_announce był pominięty).
+     *
+     * @param string $url Pełny URL http/https.
+     * @return array [zpinowany URL (string), kontekst strumienia (resource)].
+     * @throws \Exception Gdy host nie rozwiązuje się lub jest prywatny/zarezerwowany.
+     */
+    private function build_pinned( $url ) {
+        $parts = parse_url( $url );
+        $host = isset( $parts['host'] ) ? $parts['host'] : '';
+        $scheme = isset( $parts['scheme'] ) ? strtolower( $parts['scheme'] ) : 'http';
+        $default_port = ( 'https' === $scheme ) ? 443 : 80;
+        $port = isset( $parts['port'] ) ? (int) $parts['port'] : $default_port;
+        $path = ( isset( $parts['path'] ) ? $parts['path'] : '/' )
+              . ( isset( $parts['query'] ) ? '?' . $parts['query'] : '' );
+
+        $ip = $this->resolve_pinned_ip( $host );
+        if ( null === $ip ) {
+            throw new \Exception( 'Blocked or unresolvable tracker host (' . $host . ').' );
+        }
+        $ip_host = ( false !== strpos( $ip, ':' ) ) ? '[' . $ip . ']' : $ip; // nawiasy IPv6
+        $pinned_url = $scheme . '://' . $ip_host . ':' . $port . $path;
+        $host_header = $host . ( $port !== $default_port ? ':' . $port : '' );
+
+        $context = stream_context_create( array(
+            'http' => array(
+                'timeout' => $this->timeout,
+                // Nigdy nie podążamy automatycznie za redirectami — każdy hop musi być
+                // osobno zwalidowany i re-pinowany przez wołającego (http_request).
+                'follow_location' => 0,
+                'max_redirects' => 1,
+                'ignore_errors' => true,
+                // Łączymy do IP, więc nazwę wirtualnego hosta podajemy jawnie.
+                'header' => 'Host: ' . $host_header . "\r\n",
+            ),
+            'ssl' => array(
+                // Łączymy do ZPINOWANEGO IP, ale SNI i weryfikacja cert na ORYGINALNĄ nazwę.
+                'peer_name' => $host,
+                'SNI_enabled' => true,
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+            ),
+        ));
+
+        return array( $pinned_url, $context );
+    }
+
+    /**
+     * Executes the query and returns the result
+     *
+     * @throws \Exception If the connection can't be established.
+     * @throws \Exception If the response isn't valid.
+     *
+     * @param string $query The query that will be executed.
+     * @param string $host Domain or IP address of the tracker.
+     * @param int    $port Port number of the tracker, Default 80 (HTTP) or 443 (HTTPS).
+     * @return string Request response.
+     */
+    private function http_request( $query, $host, $port ) {
+        $url = $query;
+        $redirects_left = $this->max_redirects;
+        $response = false;
+
+        while ( true ) {
+            // PIN: rozwiąż host BIEŻĄCEGO $url RAZ i połącz do tego IP — zamyka okno
+            // DNS-rebindingu. Wspólny helper build_pinned() chroni tak samo http_announce.
+            // Każdy hop redirectu jest re-pinowany (nowa iteracja pętli = nowy build_pinned).
+            list( $pinned_url, $context ) = $this->build_pinned( $url );
+
+            $response = @file_get_contents( $pinned_url, false, $context, 0, self::MAX_RESPONSE_BYTES );
+            if ( false === $response ) {
+                throw new \Exception( 'Invalid scrape connection (' . $url . ').' );
+            }
+
+            $headers = isset( $http_response_header ) ? $http_response_header : array();
+            $status = $this->http_status_from_headers( $headers );
+
+            if ( $status >= 300 && $status < 400 && $redirects_left > 0 ) {
+                $location = $this->http_header_value( $headers, 'Location' );
+                if ( '' === $location ) {
+                    break;
+                }
+
+                $next = $this->resolve_redirect_url( $url, $location );
+                $next_host = (string) parse_url( $next, PHP_URL_HOST );
+                if ( '' === $next_host ) {
+                    throw new \Exception( 'Invalid redirect target from tracker (' . $host . ').' );
+                }
+
+                // SSRF: every redirect hop is checked against the same host policy
+                // as the original tracker.
+                if ( null !== $this->host_validator && ! call_user_func( $this->host_validator, $next_host ) ) {
+                    throw new \Exception( 'Blocked tracker redirect to non-public host (' . $next_host . ').' );
+                }
+
+                $url = $next;
+                $redirects_left--;
+                continue;
+            }
+
+            break;
+        }
+
+        if ( ! is_string( $response ) || ! str_starts_with( $response, 'd5:filesd20:' ) ) {
+            throw new \Exception( 'Invalid scrape response (' . $host . ':' . $port . ').' );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Returns the (last) HTTP status code from a $http_response_header array.
+     *
+     * @param array $headers Raw response header lines.
+     * @return int Status code, or 0 if none found.
+     */
+    private function http_status_from_headers( $headers ) {
+        $status = 0;
+        foreach ( $headers as $line ) {
+            if ( preg_match( '#^HTTP/\S+\s+(\d{3})#', $line, $m ) ) {
+                $status = (int) $m[1];
+            }
+        }
+
+        return $status;
+    }
+
+    /**
+     * Returns the (last) value of a header from a $http_response_header array.
+     *
+     * @param array  $headers Raw response header lines.
+     * @param string $name Header name (case-insensitive).
+     * @return string Header value, or '' if absent.
+     */
+    private function http_header_value( $headers, $name ) {
+        $name = strtolower( $name );
+        $value = '';
+        foreach ( $headers as $line ) {
+            $pos = strpos( $line, ':' );
+            if ( false !== $pos && strtolower( trim( substr( $line, 0, $pos ) ) ) === $name ) {
+                $value = trim( substr( $line, $pos + 1 ) );
+            }
+        }
+
+        return $value;
+    }
+
+    /**
+     * Resolves a (possibly relative) redirect Location against the current URL.
+     * Always yields an http/https URL, so a tracker can't redirect us into a
+     * different scheme (file://, gopher://, …).
+     *
+     * @param string $base Current request URL.
+     * @param string $location Raw Location header value.
+     * @return string Absolute http(s) URL.
+     */
+    private function resolve_redirect_url( $base, $location ) {
+        $location = trim( $location );
+
+        if ( preg_match( '#^https?://#i', $location ) ) {
+            return $location;
+        }
+
+        $parts = parse_url( $base );
+        $scheme = isset( $parts['scheme'] ) ? $parts['scheme'] : 'http';
+        $host = isset( $parts['host'] ) ? $parts['host'] : '';
+        $port = isset( $parts['port'] ) ? ':' . $parts['port'] : '';
+
+        // Scheme-relative ("//host/path").
+        if ( 0 === strpos( $location, '//' ) ) {
+            return $scheme . ':' . $location;
+        }
+
+        // Root-relative ("/path").
+        if ( 0 === strpos( $location, '/' ) ) {
+            return $scheme . '://' . $host . $port . $location;
+        }
+
+        // Document-relative ("path").
+        $path = isset( $parts['path'] ) ? $parts['path'] : '/';
+        $dir = substr( $path, 0, strrpos( $path, '/' ) + 1 );
+
+        return $scheme . '://' . $host . $port . $dir . $location;
+    }
+
+    /**
+     * Builds the query, sends the announce request and returns the data
+     *
+     * @throws \Exception If the connection can't be established.
+     *
+     * @param array|string $infohashes List (>1) or string of infohash(es).
+     * @param string       $protocol Protocol to use for the scraping.
+     * @param string       $host Domain or IP address of the tracker.
+     * @param int          $port Port number of the tracker, Default 80 (HTTP) or 443 (HTTPS).
+     * @param string       $passkey Optional. Passkey provided in the scrape request.
+     * @return string Request response.
+     */
+    private function http_announce( $infohashes, $protocol, $host, $port, $passkey ) {
+        $tracker_url = $protocol . '://' . $host . ':' . $port . $passkey;
+
+        $response_data = '';
+        foreach ( $infohashes as $infohash ) {
+            $query = $tracker_url . '/announce?info_hash=' . urlencode( pack( 'H*', $infohash ) );
+
+            // PIN: ta sama ochrona co w http_request — host rozwiązany RAZ i połączenie
+            // do zpinowanego IP (audyt: ta ścieżka była POMIJANA w pinowaniu, więc tryb
+            // announce mógł ominąć walidację adresu / dać DNS-rebinding). build_pinned()
+            // nie podąża za redirectami; tu też ich nie śledzimy (announce zwraca bencode
+            // wprost — 3xx i tak nie przejdzie sprawdzenia prefiksu niżej).
+            list( $pinned_url, $context ) = $this->build_pinned( $query );
+            if ( false === ( $response = @file_get_contents( $pinned_url, false, $context, 0, self::MAX_RESPONSE_BYTES ) ) ) {
+                throw new \Exception( 'Invalid announce connection (' . $host . ':' . $port . ').' );
+            }
+
+            if ( ! str_starts_with( $response, 'd8:completei' ) ||
+                str_starts_with( $response, 'd8:completei0e10:downloadedi0e10:incompletei1e' ) ) {
+                continue;
+            }
+
+            $ben_hash = '20:' . pack( 'H*', $infohash ) . 'd';
+            $response_data .= $ben_hash . $response;
+        }
+
+        return $response_data;
+    }
+
+    /**
+     * Parses the response and returns the data
+     *
+     * @param string $response The response that will be parsed.
+     * @param array  $infohashes List of infohash(es).
+     * @param string $host Domain or IP address of the tracker.
+     * @return array Parsed data.
+     */
+    private function http_data( $response, $infohashes, $host ) {
+        $torrents_data = array();
+
+        foreach ( $infohashes as $infohash ) {
+            $ben_hash = '20:' . pack( 'H*', $infohash ) . 'd';
+            $start_pos = strpos( $response, $ben_hash );
+            if ( false !== $start_pos ) {
+                $start = $start_pos + 24;
+                $head = substr( $response, $start );
+                $end = strpos( $head, 'ee' ) + 1;
+                $data = substr( $response, $start, $end );
+
+                $seeders = '8:completei';
+                $torrent_info['seeders'] = $this->get_information( $data, $seeders, 'e' );
+
+                $completed = '10:downloadedi';
+                $torrent_info['completed'] = $this->get_information( $data, $completed, 'e' );
+
+                $leechers = '10:incompletei';
+                $torrent_info['leechers'] = $this->get_information( $data, $leechers, 'e' );
+
+                $torrents_data[ $infohash ] = $torrent_info;
+            } else {
+                $this->collect_infohash( $infohash );
+                $this->errors[] = 'Invalid infohash (' . $infohash . ') for tracker: ' . $host . '.';
+            }
+        }
+
+        return $torrents_data;
+    }
+
+    /**
+     * Parses a string and returns the data between $start and $end.
+     *
+     * @param string $data The data that will be parsed.
+     * @param string $start Beginning part of the data.
+     * @param string $end Ending part of the data.
+     * @return int Parsed information or 0.
+     */
+    private function get_information( $data, $start, $end ) {
+        $start_pos = strpos( $data, $start );
+        if ( false !== $start_pos ) {
+            $start = $start_pos + strlen( $start );
+            $head = substr( $data, $start );
+            $end = strpos( $head, $end );
+            $information = substr( $data, $start, $end );
+
+            return (int) $information;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Initiates the UDP scraping
+     *
+     * @param array|string $infohashes List (>1) or string of infohash(es).
+     * @param string       $host Domain or IP address of the tracker.
+     * @param int          $port Optional. Port number of the tracker, Default 80.
+     * @param bool         $announce Optional. Use announce instead of scrape, Default false.
+     * @return array List of results.
+     */
+    private function scrape_udp( $infohashes, $host, $port, $announce ) {
+        list( $socket, $transaction_id, $connection_id ) = $this->prepare_udp( $host, $port );
+
+        if ( true === $announce ) {
+            $response = $this->udp_announce( $socket, $infohashes, $connection_id );
+            $keys = 'Nleechers/Nseeders';
+            $start = 12;
+            $end = 16;
+            $offset = 20;
+        } else {
+            $response = $this->udp_scrape( $socket, $infohashes, $connection_id, $transaction_id, $host, $port );
+            $keys = 'Nseeders/Ncompleted/Nleechers';
+            $start = 8;
+            $end = $offset = 12;
+        }
+        $results = $this->udp_scrape_data( $response, $infohashes, $host, $keys, $start, $end, $offset );
+
+        return $results;
+    }
+
+    /**
+     * Prepares the UDP connection
+     *
+     * @param string $host Domain or IP address of the tracker.
+     * @param int    $port Optional. Port number of the tracker, Default 80.
+     * @return array Created socket, transaction ID and connection ID.
+     */
+    private function prepare_udp( $host, $port ) {
+        $socket = $this->udp_create_connection( $host, $port );
+        $transaction_id = $this->udp_connection_request( $socket );
+        $connection_id = $this->udp_connection_response( $socket, $transaction_id, $host, $port );
+
+        return array( $socket, $transaction_id, $connection_id );
+    }
+
+    /**
+     * Creates the UDP socket and establishes the connection
+     *
+     * @throws \Exception If the socket couldn't be created or connected to.
+     *
+     * @param string $host Domain or IP address of the tracker.
+     * @param int    $port Port number of the tracker, Default 80.
+     * @return resource $socket Created and connected socket.
+     */
+    private function udp_create_connection( $host, $port ) {
+        // PIN: rozwiąż + zwaliduj RAZ, potem łącz do TEGO IP (brak drugiego DNS →
+        // brak rebindingu). Dual-stack: AF_INET6 dla IPv6 (oryginał: AF_INET = tylko v4).
+        $ip = $this->resolve_pinned_ip( $host );
+        if ( null === $ip ) {
+            throw new \Exception( 'Blocked or unresolvable UDP tracker host (' . $host . ').' );
+        }
+        $family = ( false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6 ) ) ? AF_INET6 : AF_INET;
+
+        if ( false === ( $socket = @socket_create( $family, SOCK_DGRAM, SOL_UDP ) ) ) {
+            throw new \Exception( "Couldn't create socket." );
+        }
+
+        $timeout = $this->timeout;
+        socket_set_option( $socket, SOL_SOCKET, SO_RCVTIMEO, array( 'sec' => $timeout, 'usec' => 0 ) );
+        socket_set_option( $socket, SOL_SOCKET, SO_SNDTIMEO, array( 'sec' => $timeout, 'usec' => 0 ) );
+        // Łączymy do ZPINOWANEGO IP, nie do nazwy — żadnego ponownego rozwiązania DNS.
+        if ( false === @socket_connect( $socket, $ip, $port ) ) {
+            throw new \Exception( "Couldn't connect to socket." );
+        }
+
+        return $socket;
+    }
+
+    /**
+     * Writes to the connected socket and returns the transaction ID
+     *
+     * @throws \Exception If the socket couldn't be written to.
+     *
+     * @param resource $socket The socket resource.
+     * @return int The transaction ID.
+     */
+    private function udp_connection_request( $socket ) {
+        $connection_id = "\x00\x00\x04\x17\x27\x10\x19\x80";
+        $action = pack( 'N', 0 );
+        $transaction_id = mt_rand( 0, 2147483647 );
+        $buffer = $connection_id .  $action . pack( 'N', $transaction_id );
+        if ( false === @socket_write( $socket, $buffer, strlen( $buffer ) ) ) {
+            socket_close( $socket );
+            throw new \Exception( "Couldn't write to socket." );
+        }
+
+        return $transaction_id;
+    }
+
+    /**
+     * Reads the connection response and returns the connection ID
+     *
+     * @throws \Exception If anything fails with the scraping.
+     *
+     * @param resource $socket The socket resource.
+     * @param int      $transaction_id The transaction ID.
+     * @param string   $host Domain or IP address of the tracker.
+     * @param int      $port Port number of the tracker, Default 80.
+     * @return string The connection ID.
+     */
+    private function udp_connection_response( $socket, $transaction_id, $host, $port ) {
+        if ( false === ( $response = @socket_read( $socket, 16 ) ) ) {
+            socket_close( $socket );
+            throw new \Exception( 'Invalid scrape connection! (' . $host . ':' . $port . ').' );
+        }
+
+        if ( strlen( $response ) < 16 ) {
+            socket_close( $socket );
+            throw new \Exception( 'Invalid scrape response (' . $host . ':' . $port . ').' );
+        }
+
+        $result = unpack( 'Naction/Ntransaction_id', $response );
+        if ( 0 !== $result['action'] || $result['transaction_id'] !== $transaction_id ) {
+            socket_close( $socket );
+            throw new \Exception( 'Invalid scrape result (' . $host . ':' . $port . ').' );
+        }
+
+        $connection_id = substr( $response, 8, 8 );
+
+        return $connection_id;
+    }
+
+    /**
+     * Reads the socket response and returns the torrent data
+     *
+     * @throws \Exception If anything fails while reading the response.
+     *
+     * @param resource $socket The socket resource.
+     * @param array    $hashes List (>1) or string of infohash(es).
+     * @param string   $connection_id The connection ID.
+     * @param int      $transaction_id The transaction ID.
+     * @param string   $host Domain or IP address of the tracker.
+     * @param int      $port Port number of the tracker, Default 80.
+     * @return string Response data.
+     */
+    private function udp_scrape( $socket, $hashes, $connection_id, $transaction_id, $host, $port ) {
+        $this->udp_scrape_request( $socket, $hashes, $connection_id, $transaction_id );
+
+        $read_length = 8 + ( 12 * count( $hashes ) );
+        if ( false === ( $response = @socket_read( $socket, $read_length ) ) ) {
+            socket_close( $socket );
+            throw new \Exception( 'Invalid scrape connection (' . $host . ':' . $port . ').' );
+        }
+        socket_close( $socket );
+
+        if ( strlen( $response ) < $read_length ) {
+            throw new \Exception( 'Invalid scrape response (' . $host . ':' . $port . ').' );
+        }
+
+        $result = unpack( 'Naction/Ntransaction_id', $response );
+        if ( 2 !== $result['action'] || $result['transaction_id'] !== $transaction_id ) {
+            throw new \Exception( 'Invalid scrape result (' . $host . ':' . $port . ').' );
+        }
+
+        return $response;
+    }
+
+    /**
+     * Writes to the connected socket
+     *
+     * @throws \Exception If the socket couldn't be written to.
+     *
+     * @param resource $socket The socket resource.
+     * @param array    $hashes List (>1) or string of infohash(es).
+     * @param string   $connection_id The connection ID.
+     * @param int      $transaction_id The transaction ID.
+     */
+    private function udp_scrape_request( $socket, $hashes, $connection_id, $transaction_id ) {
+        $action = pack( 'N', 2 );
+
+        $infohashes = '';
+        foreach ( $hashes as $infohash ) {
+            $infohashes .= pack( 'H*', $infohash );
+        }
+
+        $buffer = $connection_id . $action . pack( 'N', $transaction_id ) . $infohashes;
+        if ( false === @socket_write( $socket, $buffer, strlen( $buffer ) ) ) {
+            socket_close( $socket );
+            throw new \Exception( "Couldn't write to socket." );
+        }
+    }
+
+    /**
+     * Writes the announce to the connected socket
+     *
+     * @throws \Exception If the socket couldn't be written to.
+     *
+     * @param resource $socket The socket resource.
+     * @param array    $hashes List (>1) or string of infohash(es).
+     * @param string   $connection_id The connection ID.
+     * @return string Torrent(s) data.
+     */
+    private function udp_announce( $socket, $hashes, $connection_id ) {
+        $action = pack( 'N', 1 );
+        $downloaded = $left = $uploaded = "\x30\x30\x30\x30\x30\x30\x30\x30";
+        $peer_id = $this->random_peer_id();
+        $event = pack( 'N', 3 );
+        $ip_addr = pack( 'N', 0 );
+        $key = pack( 'N', mt_rand( 0, 2147483647 ) );
+        $num_want = -1;
+        $ann_port = pack( 'N', mt_rand( 0, 255 ) );
+
+        $response_data = '';
+        foreach ( $hashes as $infohash ) {
+            $transaction_id = mt_rand( 0, 2147483647 );
+            $buffer = $connection_id . $action . pack( 'N', $transaction_id ) . pack( 'H*', $infohash ) .
+                $peer_id . $downloaded . $left . $uploaded . $event . $ip_addr . $key . $num_want . $ann_port;
+
+            if ( false === @socket_write( $socket, $buffer, strlen( $buffer ) ) ) {
+                socket_close( $socket );
+                throw new \Exception( "Couldn't write announce to socket." );
+            }
+
+            $response = $this->udp_verify_announce( $socket, $transaction_id );
+            if ( false === $response ) {
+                continue;
+            }
+
+            $response_data .= $response;
+        }
+        socket_close( $socket );
+
+        return $response_data;
+    }
+
+    /**
+     * Generates a random peer ID
+     *
+     * @return string Generated peer ID.
+     */
+    private function random_peer_id() {
+        $identifier = '-SP0054-';
+        $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+        // CSPRNG (random_int) zamiast str_shuffle (nie-kryptograficzny PRNG) — modern
+        // best practice (audyt #6). Format peer_id zachowany: 8-bajtowy prefiks + 12 znaków.
+        $max = strlen( $chars ) - 1;
+        $suffix = '';
+        for ( $i = 0; $i < 12; $i++ ) {
+            $suffix .= $chars[ random_int( 0, $max ) ];
+        }
+
+        return $identifier . $suffix;
+    }
+
+    /**
+     * Verifies the correctness of the announce response
+     *
+     * @param resource $socket The socket resource.
+     * @param int      $transaction_id The transaction ID.
+     * @return string Response data.
+     */
+    private function udp_verify_announce( $socket, $transaction_id ) {
+        if ( false === ( $response = @socket_read( $socket, 20 ) ) ) {
+            return false;
+        }
+
+        if ( strlen( $response ) < 20 ) {
+            return false;
+        }
+
+        $result = unpack( 'Naction/Ntransaction_id', $response );
+        if ( 1 !== $result['action'] || $result['transaction_id'] !== $transaction_id ) {
+            return false;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Reads the socket response and returns the torrent data
+     *
+     * @param string $response Data from the request response.
+     * @param array  $hashes List (>1) or string of infohash(es).
+     * @param string $host Domain or IP address of the tracker.
+     * @param string $keys Keys for the unpacked information.
+     * @param int    $start Start of the content we want to unpack.
+     * @param int    $end End of the content we want to unpack.
+     * @param int    $offset Offset to the next content part.
+     * @return array Scraped torrent data.
+     */
+    private function udp_scrape_data( $response, $hashes, $host, $keys, $start, $end, $offset ) {
+        $torrents_data = array();
+
+        foreach ( $hashes as $infohash ) {
+            $byte_string = substr( $response, $start, $end );
+            $data = unpack( 'N', $byte_string );
+            $content = $data[1];
+            if ( ! empty( $content ) ) {
+                $results = unpack( $keys, $byte_string );
+                $torrents_data[ $infohash ] = $results;
+            } else {
+                $this->collect_infohash( $infohash );
+                $this->errors[] = 'Invalid infohash (' . $infohash . ') for tracker: ' . $host . '.';
+            }
+            $start += $offset;
+        }
+
+        return $torrents_data;
+    }
+
+    /**
+     * Collects info-hashes that couldn't be scraped.
+     *
+     * @param string $infohash Infohash that wasn't scraped.
+     */
+    private function collect_infohash( $infohash ) {
+        $this->infohashes[] = $infohash;
+    }
+
+    /**
+     * Checks if there are any errors
+     *
+     * @return bool True or false, depending if errors are present or not.
+     */
+    public function has_errors() {
+        return ! empty( $this->errors );
+    }
+
+    /**
+     * Returns all the errors that were logged
+     *
+     * @return array All the logged errors.
+     */
+    public function get_errors() {
+        return $this->errors;
+    }
+}

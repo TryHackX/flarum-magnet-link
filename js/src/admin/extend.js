@@ -25,6 +25,17 @@ export default [
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_enabled_help', {}, true),
         }))
         .setting(() => ({
+            setting: 'tryhackx-magnet-link.scraper_engine',
+            type: 'select',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_help', {}, true),
+            options: {
+                classic: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_classic', {}, true),
+                hardened: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_hardened', {}, true),
+            },
+            default: 'classic',
+        }))
+        .setting(() => ({
             setting: 'tryhackx-magnet-link.http_only',
             type: 'boolean',
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.http_only_label', {}, true),

@@ -5,6 +5,7 @@ namespace TryHackX\MagnetLink\Service;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Contracts\Cache\Repository;
 use Scrapeer\Scraper;
+use Scrapeer\ScraperViaFix;
 use TryHackX\MagnetLink\Model\MagnetLink;
 
 /**
@@ -481,13 +482,23 @@ class TrackerScraper
     private function scrapeSingle(string $infoHash, string $tracker, int $timeout, int $maxRedirects = 0, bool $allowPrivate = false): ?array
     {
         try {
-            $scraper = new Scraper();
+            // Wybór silnika scrapera (ustawienie admina — przełącznik):
+            //  - 'classic'  → Scrapeer\Scraper (jak dotąd; SSRF-guard hostIsPublic niżej),
+            //  - 'hardened' → Scrapeer\ScraperViaFix (PINOWANIE IP zamykające DNS-rebinding
+            //    + dual-stack IPv6 dla UDP). Domyślnie 'classic' = bez zmiany zachowania.
+            $engine = (string) $this->settings->get('tryhackx-magnet-link.scraper_engine', 'classic');
+            $scraper = $engine === 'hardened' ? new ScraperViaFix() : new Scraper();
             $scraper->set_max_redirects($maxRedirects);
             if ($maxRedirects > 0) {
                 // Waliduj KAŻDY hop przekierowania tą samą polityką co host
                 // pierwotny — pozwala na http→https (Cloudflare/CDN), ale nie
                 // pozwala przekierować scrapera na adres wewnętrzny (SSRF).
                 $scraper->set_host_validator(fn (string $host): bool => $allowPrivate || $this->hostIsPublic($host));
+            }
+            // Wariant utwardzony pinuje IP — przekaż mu admiński opt-in na adresy prywatne
+            // (allow_private_trackers), inaczej blokowałby też celowo dozwolone wewnętrzne.
+            if ($scraper instanceof ScraperViaFix) {
+                $scraper->set_allow_private($allowPrivate);
             }
             $result = $scraper->scrape($infoHash, [$tracker], null, $timeout, false);
         } catch (\Throwable $e) {

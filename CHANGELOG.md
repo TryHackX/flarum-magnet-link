@@ -10,6 +10,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.0] - 2026-06-18
+
+> Dodaje wybierany przez admina silnik scrapera: klasyczny (jak dotąd) albo utwardzony,
+> który PINUJE rozwiązane IP (zamyka okno SSRF/DNS-rebinding) i obsługuje IPv6 po UDP.
+> **Nowy plik + frontend + PHP, bez migracji** — przebuduj assety: `composer update` +
+> `npm --prefix js run build` + `php flarum cache:clear`. Domyślnie `classic` = bez zmiany zachowania.
+
+### Added
+- **Przełącznik silnika scrapera (`scraper_engine`: `classic` | `hardened`).** Nowy
+  dropdown w panelu admina (sekcja Scraper). `classic` (domyślny) = oryginalny
+  `Scrapeer\Scraper`, bez zmian. `hardened` = nowy `Scrapeer\ScraperViaFix`:
+  - **Pinowanie IP** — host trackera rozwiązywany RAZ (A + AAAA), walidowany zakresowo
+    (`NO_PRIV_RANGE|NO_RES_RANGE`) i połączenie idzie do TEGO IP — brak drugiego zapytania
+    DNS, więc nie ma okna na rebinding między kontrolą a połączeniem (zamyka udokumentowaną
+    resztkę DNS-rebindingu dla WSZYSTKICH hostów, nie tylko z allowlisty).
+  - **IPv6** — UDP jest teraz dual-stack (`AF_INET6`); klasyczna ścieżka UDP była tylko IPv4.
+  - HTTP/HTTPS — **obie ścieżki, `/scrape` i `/announce`** — łączą się do zpinowanego IP
+    przez WSPÓLNY helper `build_pinned()`, wysyłając oryginalny nagłówek `Host` i
+    weryfikując TLS SNI/certyfikat na oryginalną nazwę; każdy hop redirectu jest re-pinowany.
+    (Audyt wyłapał, że `http_announce` początkowo pomijał pinowanie — teraz oba tory dzielą
+    jedną, przetestowaną ścieżkę, więc żaden tryb nie omija walidacji.) Respektuje
+    `allow_private_trackers` przez `set_allow_private()`.
+
+### Notes
+- `hardened` ściśle weryfikuje certyfikaty TLS (`verify_peer`), więc trackery z zepsutym/
+  self-signed certem mogą pod nim przestać odpowiadać — dlatego `classic` zostaje domyślny.
+- `ScraperViaFix` ma dwa drobne usztywnienia z audytu AI: CSPRNG `random_int` w
+  `random_peer_id` (zamiast `str_shuffle`) oraz `str_starts_with` dla prefiksu bencode.
+- **Świadomie POMINIĘTE** (ryzykowne na vendored forku — wymagałyby korpusu testów realnych
+  trackerów): przepisanie HTTP na cURL/`CURLOPT_RESOLVE`, przepisanie pozycyjnego parsera
+  bencode, model wyjątków zamiast tablicy błędów, `strict_types`/całościowy lifting PHP-8.
+  Zweryfikowane na `http://flarum.localhost/`: oba silniki scrapują ten sam magnet do tego
+  samego wyniku (seeders=1), HTTP 200; test jednostkowy pin/validate (loopback/metadata/
+  prywatne/ULA v6 → blokada, publiczne v4+v6 → przepuszczone) ALL PASS.
+
 ## [2.7.1] - 2026-06-17
 
 > Floxum audit (runda 2) — rejestruje brakujący default białej listy hostów trackerów,

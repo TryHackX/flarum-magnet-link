@@ -75,6 +75,10 @@ return [
         ->default('tryhackx-magnet-link.guest_visible', false)
         ->default('tryhackx-magnet-link.activated_only', false)
         ->default('tryhackx-magnet-link.scraper_enabled', true)
+        // Silnik scrapera: 'classic' (Scrapeer\Scraper, jak dotąd) lub 'hardened'
+        // (Scrapeer\ScraperViaFix — pinowanie IP vs DNS-rebinding + IPv6 dla UDP).
+        // Domyślnie 'classic' = bez zmiany zachowania dla istniejących instalacji.
+        ->default('tryhackx-magnet-link.scraper_engine', 'classic')
         ->default('tryhackx-magnet-link.http_only', false)
         // Domyślnie blokujemy trackery wskazujące na adresy prywatne/wewnętrzne
         // (ochrona przed SSRF). Włącz tylko jeśli świadomie hostujesz tracker w LAN.
