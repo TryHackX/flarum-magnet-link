@@ -18,7 +18,24 @@ Flarum installations:
   actively developed** — stays available for legacy installs but won't
   receive new features.
 
-> **Latest highlights (2.3.0):**
+> **Latest highlights (2.9.0):**
+> - **Hardened scraper engine (now the default)** — a cURL engine that pins the
+>   resolved tracker IP, closing the DNS-rebinding / SSRF window for HTTP(S) and UDP
+>   (strict TLS, IPv6, bounded response, re-validated redirects). A *Classic*
+>   `file_get_contents` engine stays as a no-cURL fallback. (2.8.0 / 2.8.1)
+> - **Separate, configurable scrape time budgets** — the discussion-list tooltip and
+>   the open-topic card now have independent, admin-set time budgets (default 4 s vs
+>   15 s, hard-capped at 30 s), so the tooltip can reach a live tracker on magnets with
+>   many (or dead-first) trackers instead of giving up early.
+> - **Hover concurrency limit** — rapid hovering no longer piles up scrape requests on
+>   PHP workers: a client-side limit (default 2) aborts the oldest in-flight request, and
+>   leaving / opening a discussion aborts pending ones (`AbortController`).
+> - **Tooltip-specific tracker tuning** — optional per-tooltip tracker timeout and max
+>   tracker count (both inherit the global value by default), tuned independently of the topic.
+> - **Opt-in tracker host allowlist** — restrict scraping to a list of trusted hosts,
+>   fully closing the SSRF surface for attacker-supplied trackers. (2.6.1)
+>
+> **Earlier highlights (2.3.0):**
 > - **Restricted-discussion leak fixed** — the discussion-list tooltip endpoint
 >   now enforces per-discussion / per-post visibility, so members can't
 >   enumerate magnet metadata (or, via the token, the URI) from topics they
@@ -82,10 +99,14 @@ Flarum installations:
   time-budgeted so a single magnet can't exhaust a worker.
 - **Aggregation modes** — with *Check All Trackers* on, results are combined
   across trackers as average, average-max-downloads, or max-all.
+- **Two scraper engines** — the default *hardened* engine pins the resolved tracker
+  IP (cURL + `CURLOPT_RESOLVE`, strict TLS, dual-stack UDP) to close the DNS-rebinding
+  window; *classic* (`file_get_contents`, no cURL) is kept as a fallback.
 - **Result caching** — stats are cached server-side and in the browser; the
   lifetime is configurable and caching can be turned off entirely.
-- **Performance knobs** — configurable per-tracker timeout and max
-  tracker count.
+- **Performance knobs** — separate, admin-configurable scrape time budgets for the
+  in-topic card and the list tooltip (hard-capped at 30 s), plus a per-tracker timeout
+  and max tracker count — each also overridable just for the tooltip.
 - **Manual refresh (rate-limited)** — per-link refresh button to re-pull fresh
   stats (bypasses the cache for a genuine re-scrape). Bounded by a global
   per-magnet cooldown — one refresh updates the shared result everyone sees —
@@ -110,6 +131,11 @@ Flarum installations:
 - **Configurable client cache** — the same magnet hovered repeatedly only
   hits the API once within the cache lifetime (default 5 minutes; adjustable
   or disable-able from admin, in sync with the server-side cache).
+- **Bounded hover load** — a per-hover scrape time budget plus a client-side
+  concurrency limit (default 2, abort-oldest via `AbortController`) keep rapid
+  hovering from piling up synchronous scrape requests on PHP workers; leaving or
+  opening a discussion aborts pending requests. Optional tooltip-only tracker
+  timeout / max-tracker overrides tune reach vs. cost independently of the topic.
 
 ### Backfill for old posts
 
@@ -185,11 +211,22 @@ request headers.
 
 **Bundled scraper library:** the BitTorrent scraping uses a **hardened in-tree fork**
 of [Scrapeer](https://github.com/medariox/scrapeer) (under `src/Scraper/`, PSR-4
-`Scrapeer\`). The fork adds a bounded response size, a configurable redirect cap and
-a host-validator hook used by the SSRF guard above. Because it is vendored rather
-than required through Composer, upstream changes are **tracked and ported by hand**
-against the upstream repository, and `composer audit` will not surface them
-automatically.
+`Scrapeer\`). It ships **two engines**, selectable in admin:
+
+- **Hardened (default)** — a cURL-based engine that **pins the resolved IP**: the tracker
+  host is resolved and range-validated once, and the connection is forced to that exact IP
+  (`CURLOPT_RESOLVE` for HTTP(S), a connected socket for UDP), so there is **no second DNS
+  lookup to rebind** between the check and the connection. TLS is strictly verified (peer +
+  host) against the original hostname, the protocol is restricted to HTTP(S), the response
+  size is bounded, and redirects are followed manually — each hop re-validated and re-pinned.
+  UDP is dual-stack (IPv6). *Requires the cURL extension.*
+- **Classic** — the original `file_get_contents` engine (no cURL dependency) with a documented
+  residual DNS-rebinding window; kept as a fallback for hosts without cURL.
+
+Because the fork is vendored rather than required through Composer, upstream changes are
+**tracked and ported by hand**, and `composer audit` will not surface them automatically. The
+`src/Scraper/` subtree keeps its upstream **CC BY-SA 3.0** license (the rest of the extension
+is MIT) — see `src/Scraper/NOTICE.md`.
 
 ## Screenshots
 
@@ -251,14 +288,17 @@ Go to **Admin → Extensions → Magnet Link**.
 | Visible to Guests | Off | If off, guests get a permission message (see below). |
 | Activated Users Only | Off | Require email confirmation. |
 | Enable Tracker Scraping | On | Off → only name + click counter shown. |
+| **Scraper Engine** | **Hardened** | *Hardened* (default) = cURL engine that pins the resolved IP (closes the DNS-rebinding / SSRF window), strict TLS, IPv6 UDP — **requires the cURL extension**. *Classic* = the original `file_get_contents` engine (no cURL) with a documented residual rebinding window; pick it only if cURL is unavailable. |
 | HTTP(S) Trackers Only | Off | Useful if UDP is blocked on your host. |
 | **Allow Private/Internal Trackers** | **Off** | Off blocks trackers resolving to private / loopback / reserved IPs (SSRF protection). Enable only for an intentional tracker on a private network. |
 | Check All Trackers | Off | On → contact every allowed tracker and aggregate; off → stop at the first responder. |
 | Display Type | Average | How to aggregate across trackers when *Check All* is on (average / average-max-downloads / max-all). |
 | Tracker Timeout | 2 s | Per-tracker (clamped to the remaining time budget). |
 | Maximum Trackers | 0 | Max trackers contacted per magnet. 0 = built-in safety cap (12); a wall-clock budget also applies. |
+| **Topic Scrape Time Budget (seconds)** | **15** | Total tracker-scrape time for a magnet shown in the open topic (the in-post card). Clamped to 2–30 s (a hard 30 s ceiling bounds the worker no matter what). Raise it for magnets with many trackers. |
 | **Max Tracker Redirects** | **0** | HTTP(S) redirects to follow per tracker (0–5). 0 = don't follow. Raise to 1–2 for a tracker behind Cloudflare/CDN that redirects http→https; every hop is re-validated by the SSRF guard. |
 | **Priority Trackers** | *(empty)* | Optional, one tracker host per line. Listed hosts are queried first (in order) when a magnet contains them — better stats/latency in the default "first responder" mode. Reorder only; never adds trackers not in the magnet. |
+| **Tracker host allowlist (security)** | *(empty)* | Optional, one trusted tracker host per line. When non-empty, **only** these hosts are ever contacted — tracker URLs from post content that aren't listed are skipped entirely, closing the SSRF / DNS-rebinding surface for attacker-supplied trackers. Empty = scrape any public host (still behind the SSRF guard). |
 | **Cache Tracker Results** | **On** | Cache stats (server + browser) so repeated views / hovers don't re-query trackers. The main brake on hover-driven load. |
 | **Cache Lifetime (seconds)** | **300** | How long cached stats stay valid. 0 disables caching. |
 | **Refresh Cooldown (seconds)** | **30** | Global per-magnet cooldown for the manual refresh button. One refresh updates the shared result everyone sees; the magnet can't be re-refreshed sooner. 0 = no cooldown. Needs caching on to share the result. |
@@ -267,6 +307,10 @@ Go to **Admin → Extensions → Magnet Link**.
 | Enable Click Tracking | On | Show click counts and feed the ban system. |
 | Enable Discussion Tooltip | On | Show the hover tooltip on the discussion list. |
 | Max Magnets in Tooltip | 3 | Truncate longer lists. |
+| **Tooltip Scrape Time Budget (seconds)** | **4** | Time budget shared across all magnets scraped for one discussion-list hover. Kept short (the scrape holds a worker while you hover); the open topic uses the larger budget above. Clamped to 2–30 s. Raise it if the tooltip often shows "no response". |
+| **Max Concurrent Tooltip Requests** | **2** | How many hover-scrape requests may run at once (1–6). Hovering past this aborts the oldest in-flight request; leaving or opening a discussion aborts pending ones. Caps how many workers rapid hovering can tie up. |
+| **Tooltip: Max Trackers to Query** | **0** | Max trackers the tooltip contacts per magnet. 0 = inherit *Maximum Trackers*. A different value gets its own cache entry, so it never poisons the topic's full result. |
+| **Tooltip: Tracker Timeout (seconds)** | **0** | Per-tracker timeout for tooltip scrapes. 0 = inherit *Tracker Timeout*. Lower it (e.g. 1) so dead trackers fail faster and more get tried within the budget — the most effective way to reach a live tracker when dead trackers are listed first. |
 | **Show permission message in tooltip** | **On** | Render "You must be logged in…" in the tooltip when permissions block the request, instead of letting the loading state flash and disappear. |
 | Enable Custom Torrent Names | On | Authors can rename their own magnets. |
 | **Desktop card style** | **Standard** | *Standard* (single-row) or *Mobile style (also on desktop)* — applies the phone layout at all widths. Phones always use the mobile layout. |

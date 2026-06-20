@@ -123,7 +123,16 @@ class InfoController implements RequestHandlerInterface
             }
         }
 
-        $response['scrape'] = $this->scraper->scrapeForMagnet($magnetLink, null, $doBypass);
+        // Budżet czasu scrapowania dla widoku w TEMACIE (karta w poście).
+        // Konfigurowalny przez admina (topic_scrape_budget), twardo ograniczony
+        // sufitem TrackerScraper::HARD_TIME_BUDGET (anty-DoS). Większy niż budżet
+        // tooltipa, bo to główny, dokładny widok danych magnetu.
+        // Floor = 2 (nie 1): budżet 1 s nie zdąży skontaktować ani jednego
+        // trackera przez guard `remaining < 1.0` w computeScrape (martwa strefa).
+        $budget = (int) $this->settings->get('tryhackx-magnet-link.topic_scrape_budget', 15);
+        $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
+
+        $response['scrape'] = $this->scraper->scrapeForMagnet($magnetLink, microtime(true) + $budget, $doBypass);
 
         return new JsonResponse($response);
     }

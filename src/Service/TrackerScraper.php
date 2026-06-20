@@ -49,8 +49,15 @@ class TrackerScraper
      */
     private const HARD_CONSIDER_CAP = 25;
 
-    /** Absolute wall-clock ceiling (seconds) for scraping a single magnet. */
-    private const HARD_TIME_BUDGET = 15.0;
+    /**
+     * Absolute wall-clock ceiling (seconds) for scraping a single magnet — the
+     * hard anti-DoS cap that bounds a PHP-FPM worker no matter what. The per-view
+     * budgets the controllers pass as $deadline (tooltip_scrape_budget default 4,
+     * topic_scrape_budget default 15) sit BELOW this and are clamped to it, so an
+     * admin can lengthen a scrape up to here but never past it. Public so those
+     * controllers can clamp their settings against one source of truth.
+     */
+    public const HARD_TIME_BUDGET = 30.0;
 
     /**
      * Max TTL (seconds) for cached *failures*. Kept short so a transient miss —
@@ -81,15 +88,34 @@ class TrackerScraper
      *   time across all of them.
      * @param bool $bypassCache Skip the cached value (the manual refresh button)
      *   but still refresh and store it.
+     * @param int|null $maxTrackersOverride Per-call override for the number of
+     *   trackers contacted (the tooltip passes its own `tooltip_max_trackers`);
+     *   null or ≤0 inherits the global `max_trackers`. It is part of the cache
+     *   key, so a tooltip that contacts fewer trackers can't poison the topic's
+     *   full result (and vice versa).
+     * @param int|null $timeoutOverride Per-call per-tracker timeout override
+     *   (the tooltip's `tooltip_tracker_timeout`); null or ≤0 inherits the
+     *   global `tracker_timeout`. NOT part of the cache key (like the global
+     *   timeout it only affects success/failure timing, not the values).
      */
-    public function scrapeForMagnet(MagnetLink $magnet, ?float $deadline = null, bool $bypassCache = false): ?array
+    public function scrapeForMagnet(MagnetLink $magnet, ?float $deadline = null, bool $bypassCache = false, ?int $maxTrackersOverride = null, ?int $timeoutOverride = null): ?array
     {
         if (! (bool) $this->settings->get('tryhackx-magnet-link.scraper_enabled', true)) {
             return null;
         }
 
+        // Resolve the EFFECTIVE raw max-trackers / timeout once (override wins
+        // when >0, else the global setting) so the cache key and the scrape can
+        // never diverge.
+        $maxRaw = ($maxTrackersOverride !== null && $maxTrackersOverride > 0)
+            ? $maxTrackersOverride
+            : (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0);
+        $timeoutRaw = ($timeoutOverride !== null && $timeoutOverride > 0)
+            ? $timeoutOverride
+            : (int) $this->settings->get('tryhackx-magnet-link.tracker_timeout', 2);
+
         $cacheEnabled = (bool) $this->settings->get('tryhackx-magnet-link.cache_enabled', true);
-        $cacheKey = $this->cacheKey($magnet);
+        $cacheKey = $this->cacheKey($magnet, $maxRaw, $timeoutRaw);
 
         if ($cacheEnabled && ! $bypassCache) {
             $cached = $this->cache->get($cacheKey);
@@ -98,7 +124,7 @@ class TrackerScraper
             }
         }
 
-        $result = $this->computeScrape($magnet, $deadline);
+        $result = $this->computeScrape($magnet, $deadline, $maxRaw, $timeoutRaw);
 
         if ($cacheEnabled) {
             $ttl = (int) $this->settings->get('tryhackx-magnet-link.cache_ttl', 300);
@@ -113,22 +139,29 @@ class TrackerScraper
         return $result;
     }
 
-    private function cacheKey(MagnetLink $magnet): string
+    private function cacheKey(MagnetLink $magnet, int $maxRaw, int $timeoutRaw): string
     {
         // Każde ustawienie, które zmienia KTÓRE trackery są odpytywane lub JAK
         // wyniki są agregowane, musi być częścią klucza — inaczej zmiana
         // ustawienia działałaby dopiero po wygaśnięciu TTL. Dotyczy to zwłaszcza
         // allow_private_trackers: to przełącznik bezpieczeństwa, więc po jego
         // wyłączeniu nie wolno dalej serwować wyników zebranych według starej
-        // polityki. tracker_timeout pomijamy celowo (wpływa tylko na sukces/
-        // porażkę, nie na same wartości), żeby nie fragmentować cache przy
-        // każdej korekcie limitu czasu.
+        // polityki.
         $parts = [
             (string) $this->settings->get('tryhackx-magnet-link.display_type', 'average'),
             (bool) $this->settings->get('tryhackx-magnet-link.check_all', false) ? 'all' : 'first',
             (bool) $this->settings->get('tryhackx-magnet-link.http_only', false) ? 'http' : 'any',
             (bool) $this->settings->get('tryhackx-magnet-link.allow_private_trackers', false) ? 'priv' : 'pub',
-            'm' . (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0),
+            // Efektywny max-trackers TEGO wywołania (tooltip może mieć własny limit
+            // — patrz scrapeForMagnet). W kluczu, by wynik tooltipa z innym limitem
+            // nie zatruł pełnego wyniku w temacie.
+            'm' . $maxRaw,
+            // Efektywny per-tracker timeout TEGO wywołania. Przy check_all=true krótszy
+            // timeout = mniej trackerów zdąży = inna agregacja (inne wartości), więc
+            // gdy tooltip ma własny tooltip_tracker_timeout ≠ globalnego, MUSI mieć
+            // osobny wpis (inaczej zatruwałby temat na cały cache_ttl). Przy domyślnych
+            // (tooltip dziedziczy globalny) timeouty są równe → ten sam klucz → współdzielą.
+            't' . $timeoutRaw,
             // Lista priorytetowa zmienia „pierwszego respondera" → też w kluczu.
             $this->priorityFingerprint(),
             // Biała lista zmienia KTÓRE hosty są odpytywane → też w kluczu (audyt M1).
@@ -138,7 +171,7 @@ class TrackerScraper
         return 'tryhackx-magnet-link.scrape.' . strtolower($magnet->info_hash) . '.' . implode('.', $parts);
     }
 
-    private function computeScrape(MagnetLink $magnet, ?float $deadline): array
+    private function computeScrape(MagnetLink $magnet, ?float $deadline, int $maxRaw, int $timeoutRaw): array
     {
         $candidates = $this->candidateTrackers($magnet);
 
@@ -160,11 +193,10 @@ class TrackerScraper
             ];
         }
 
-        $timeout = (int) $this->settings->get('tryhackx-magnet-link.tracker_timeout', 2);
-        $timeout = $timeout > 0 ? min($timeout, 30) : 2;
-
-        $maxSetting = (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0);
-        $maxTrackers = $maxSetting > 0 ? min($maxSetting, self::HARD_TRACKER_CAP) : self::HARD_TRACKER_CAP;
+        // Efektywny per-tracker timeout i limit trackerów (już rozwinięte z
+        // override'ów tooltipa lub globalnych ustawień w scrapeForMagnet).
+        $timeout = $timeoutRaw > 0 ? min($timeoutRaw, 30) : 2;
+        $maxTrackers = $maxRaw > 0 ? min($maxRaw, self::HARD_TRACKER_CAP) : self::HARD_TRACKER_CAP;
 
         $checkAll = (bool) $this->settings->get('tryhackx-magnet-link.check_all', false);
         $allowPrivate = (bool) $this->settings->get('tryhackx-magnet-link.allow_private_trackers', false);

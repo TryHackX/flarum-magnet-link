@@ -13,10 +13,23 @@ published anywhere upstream.
 
 ## TryHackX modifications (hardening)
 
+In `Scraper.php` (the `classic` engine):
+
 - `set_host_validator()` — per-hop SSRF host-validation callback (used by
   `TrackerScraper::hostIsPublic()` to refuse private/loopback/reserved targets).
 - `set_max_redirects()` — cap or disable HTTP redirect following (default 0).
 - A bounded maximum response size.
+
+In `ScraperViaFix.php` (the `hardened` engine — **the default**): a thin subclass
+(`extends Scraper`) overriding only the three connection methods, so there is **no code
+duplication** with `Scraper.php`:
+
+- **IP pinning** (`resolve_pinned_ip()`) — the tracker host is resolved + range-validated
+  once and the connection is forced to that exact IP, closing the DNS-rebinding / SSRF
+  window. Dual-stack (A + AAAA); `set_allow_private()` mirrors `allow_private_trackers`.
+- **cURL** for HTTP/HTTPS via `CURLOPT_RESOLVE` (TLS SNI/certificate verified against the
+  original hostname; `CURLOPT_PROTOCOLS` limited to HTTP(S); bounded response size).
+- **Dual-stack UDP** (`AF_INET6`) connecting to the pinned IP.
 
 These modifications are distributed under the same **CC BY-SA 3.0** terms.
 

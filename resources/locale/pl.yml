@@ -13,7 +13,7 @@ tryhackx-magnet-link:
             scraper_enabled_help: "Po włączeniu rozszerzenie będzie odpytywać trackery o statystyki seed/leech/pobrań. Po wyłączeniu wyświetlana będzie tylko nazwa torrenta i licznik kliknięć."
 
             scraper_engine_label: "Silnik scrapera"
-            scraper_engine_help: "Klasyczny = oryginalny scraper (domyślny, bez zmiany zachowania). Utwardzony = pinuje rozwiązane IP, zamykając lukę SSRF/DNS-rebinding, i dodaje obsługę IPv6 dla trackerów UDP. Utwardzony ściśle weryfikuje certyfikaty TLS, więc trackery z zepsutym/self-signed certem mogą przestać odpowiadać."
+            scraper_engine_help: "Utwardzony (domyślny) = silnik cURL pinujący rozwiązane IP (zamyka lukę SSRF/DNS-rebinding) i dodający obsługę IPv6 dla trackerów UDP; wymaga rozszerzenia cURL i ściśle weryfikuje TLS, więc trackery z zepsutym/self-signed certem mogą przestać odpowiadać. Klasyczny = oryginalny silnik file_get_contents (bez cURL) z udokumentowanym rezydualnym oknem rebindingu — wybierz tylko, gdy cURL niedostępny."
             scraper_engine_classic: "Klasyczny (kompatybilny)"
             scraper_engine_hardened: "Utwardzony (pinowanie IP, IPv6, ścisły TLS)"
 
@@ -37,6 +37,9 @@ tryhackx-magnet-link:
 
             max_trackers_label: "Maksymalna liczba trackerów"
             max_trackers_help: "Maksymalna liczba trackerów odpytywanych na jeden magnet. Ustaw 0, aby użyć wbudowanego limitu bezpieczeństwa (12). Dodatkowo obowiązuje twardy budżet czasu, więc pojedynczy magnet nie zawiesi żądania."
+
+            topic_scrape_budget_label: "Budżet czasu scrapowania w temacie (sekundy)"
+            topic_scrape_budget_help: "Maksymalny łączny czas scrapowania trackerów dla magnetu w otwartym temacie (karta w poście). Domyślnie 15. To dokładny, pełny widok, więc dostaje większy budżet niż dymek listy. Twardo ograniczony do 30 sekund, by jedno żądanie nie wiązało workera na długo."
 
             scraper_max_redirects_label: "Maks. przekierowań trackera"
             scraper_max_redirects_help: "Ile przekierowań HTTP(S) podążyć przy scrapowaniu trackera. Domyślnie 0 (nie podążaj). Zwiększ do 1-2, jeśli tracker jest za Cloudflare lub CDN przekierowującym http→https. Każdy hop jest nadal walidowany guardem SSRF, więc tracker nie przekieruje żądania na adres prywatny/wewnętrzny."
@@ -70,6 +73,18 @@ tryhackx-magnet-link:
 
             tooltip_max_magnets_label: "Maks. magnetów w dymku"
             tooltip_max_magnets_help: "Maksymalna liczba linków magnet wyświetlanych w dymku dyskusji. Ustaw 0 dla nieograniczonej."
+
+            tooltip_scrape_budget_label: "Budżet czasu scrapowania dymka (sekundy)"
+            tooltip_scrape_budget_help: "Łączny budżet czasu dzielony przez wszystkie magnety scrapowane dla jednego najechania na liście dyskusji. Trzymany krótko (domyślnie 4), bo scrape biegnie synchronicznie i wiąże workera PHP podczas najechania; karta w temacie używa większego budżetu tematu dla pełnej dokładności. Zwiększ, jeśli Twoje magnety mają wiele trackerów i dymek często pokazuje „brak odpowiedzi”. Twardo ograniczony do 30 sekund."
+
+            tooltip_max_concurrent_label: "Maks. równoczesnych żądań dymka"
+            tooltip_max_concurrent_help: "Ile żądań scrapingu z najeżdżania może biec naraz (domyślnie 2). Gdy najedziesz na kolejne tematy ponad ten limit, najnowszy hover przerywa najstarsze żądanie w locie. Opuszczenie tematu lub jego otwarcie również przerywa jego żądanie. To ogranicza, ilu workerów PHP może zająć szybkie przeglądanie listy. Zmniejsz (np. 1) na małym/współdzielonym hostingu; zwiększ (do 6) tylko gdy serwer ma zapas workerów."
+
+            tooltip_max_trackers_label: "Dymek: maks. trackerów do odpytania"
+            tooltip_max_trackers_help: "Maksymalna liczba trackerów, które dymek odpytuje na jeden magnet. Ustaw 0 (domyślnie), aby dziedziczyć globalne „Maksymalna liczba trackerów”. Dymek już omija trackery, które nie odpowiadają — ogranicza go budżet czasu dymka powyżej, a nie to, gdzie jest pierwszy martwy tracker. Ustaw tu osobną wartość tylko po to, by dymek miał inny limit niż karta w temacie; inna wartość dostaje własny wpis cache, więc nigdy nie zatruwa pełnego wyniku tematu."
+
+            tooltip_tracker_timeout_label: "Dymek: limit czasu trackera (sekundy)"
+            tooltip_tracker_timeout_help: "Per-tracker limit czasu odpowiedzi używany tylko przy scrapowaniu dymka. Ustaw 0 (domyślnie), aby dziedziczyć globalny „Limit czasu trackera”. Zmniejszenie (np. 1) sprawia, że martwe/wolne trackery szybciej zawodzą, więc w budżecie czasu dymka zdąży się odpytać więcej trackerów — najskuteczniejszy sposób, by dymek dotarł do żywego trackera, gdy prywatne/martwe trackery są na początku listy. Nie wpływa na kartę w temacie."
 
             tooltip_show_permission_errors_label: "Pokazuj komunikat o uprawnieniach w dymku"
             tooltip_show_permission_errors_help: "Gdy gość lub użytkownik bez uprawnień najedzie na temat z magnet linkami, pokaż w dymku czytelny komunikat (\"Musisz być zalogowany…\") zamiast pozwalać mu zniknąć po krótkim mignięciu stanu ładowania. Działa analogicznie do widoku w poście. Domyślnie włączone."

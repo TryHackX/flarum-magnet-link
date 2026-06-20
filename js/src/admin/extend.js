@@ -30,10 +30,10 @@ export default [
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_label', {}, true),
             help: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_help', {}, true),
             options: {
-                classic: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_classic', {}, true),
                 hardened: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_hardened', {}, true),
+                classic: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_engine_classic', {}, true),
             },
-            default: 'classic',
+            default: 'hardened',
         }))
         .setting(() => ({
             setting: 'tryhackx-magnet-link.http_only',
@@ -82,6 +82,15 @@ export default [
             min: 0,
             max: 50,
             default: 0,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.topic_scrape_budget',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.topic_scrape_budget_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.topic_scrape_budget_help', {}, true),
+            min: 2,
+            max: 30,
+            default: 15,
         }))
         .setting(() => ({
             setting: 'tryhackx-magnet-link.scraper_max_redirects',
@@ -174,6 +183,42 @@ export default [
             min: 0,
             max: 20,
             default: 3,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_scrape_budget',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_scrape_budget_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_scrape_budget_help', {}, true),
+            min: 2,
+            max: 30,
+            default: 4,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_max_concurrent',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_concurrent_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_concurrent_help', {}, true),
+            min: 1,
+            max: 6,
+            default: 2,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_max_trackers',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_trackers_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_max_trackers_help', {}, true),
+            min: 0,
+            max: 50,
+            default: 0,
+        }))
+        .setting(() => ({
+            setting: 'tryhackx-magnet-link.tooltip_tracker_timeout',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_tracker_timeout_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.tooltip_tracker_timeout_help', {}, true),
+            min: 0,
+            max: 30,
+            default: 0,
         }))
         .setting(() => ({
             setting: 'tryhackx-magnet-link.tooltip_show_permission_errors',

@@ -10,68 +10,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.8.0] - 2026-06-18
+## [2.9.0] - 2026-06-20
 
-> Dodaje wybierany przez admina silnik scrapera: klasyczny (jak dotąd) albo utwardzony,
-> który PINUJE rozwiązane IP (zamyka okno SSRF/DNS-rebinding) i obsługuje IPv6 po UDP.
-> **Nowy plik + frontend + PHP, bez migracji** — przebuduj assety: `composer update` +
-> `npm --prefix js run build` + `php flarum cache:clear`. Domyślnie `classic` = bez zmiany zachowania.
+> Separates the tracker-scrape time budgets for the discussion-list tooltip and the open-topic
+> card (both now admin-configurable), and adds a client-side concurrency limit for hover-driven
+> scrape requests. **Frontend + PHP, no migrations** — rebuild assets: `composer update` +
+> `npm --prefix js run build` + `php flarum cache:clear`.
 
 ### Added
-- **Przełącznik silnika scrapera (`scraper_engine`: `classic` | `hardened`).** Nowy
-  dropdown w panelu admina (sekcja Scraper). `classic` (domyślny) = oryginalny
-  `Scrapeer\Scraper`, bez zmian. `hardened` = nowy `Scrapeer\ScraperViaFix`:
-  - **Pinowanie IP** — host trackera rozwiązywany RAZ (A + AAAA), walidowany zakresowo
-    (`NO_PRIV_RANGE|NO_RES_RANGE`) i połączenie idzie do TEGO IP — brak drugiego zapytania
-    DNS, więc nie ma okna na rebinding między kontrolą a połączeniem (zamyka udokumentowaną
-    resztkę DNS-rebindingu dla WSZYSTKICH hostów, nie tylko z allowlisty).
-  - **IPv6** — UDP jest teraz dual-stack (`AF_INET6`); klasyczna ścieżka UDP była tylko IPv4.
-  - HTTP/HTTPS — **obie ścieżki, `/scrape` i `/announce`** — łączą się do zpinowanego IP
-    przez WSPÓLNY helper `build_pinned()`, wysyłając oryginalny nagłówek `Host` i
-    weryfikując TLS SNI/certyfikat na oryginalną nazwę; każdy hop redirectu jest re-pinowany.
-    (Audyt wyłapał, że `http_announce` początkowo pomijał pinowanie — teraz oba tory dzielą
-    jedną, przetestowaną ścieżkę, więc żaden tryb nie omija walidacji.) Respektuje
-    `allow_private_trackers` przez `set_allow_private()`.
+- **Separate, configurable scrape time budgets for the tooltip vs the topic.** Two new admin
+  number settings (Scraper / Tooltip sections):
+  - **Topic scrape time budget** (`topic_scrape_budget`, default 15 s) — the total tracker-scrape
+    time for a magnet shown in the open topic (the in-post card). Previously a fixed internal ceiling.
+  - **Tooltip scrape time budget** (`tooltip_scrape_budget`, default 4 s) — the time budget shared
+    across all magnets scraped for one discussion-list hover. Previously a hard-coded constant.
+  - Both are clamped to `[2, 30]` seconds. The absolute per-magnet safety ceiling
+    (`HARD_TIME_BUDGET`) is raised to 30 s and is now the hard cap both settings sit beneath — an
+    admin can lengthen a scrape up to 30 s but never past it (one request can't tie up a worker for
+    longer). The minimum is 2 s because a 1 s budget can't complete even a single tracker call.
+  - This fixes the common case where a magnet with many trackers (especially private/dead trackers
+    listed first) showed "no response" in the tooltip while the topic showed correct seeders — the
+    tooltip simply ran out of its short budget before reaching a live tracker. Raising
+    `tooltip_scrape_budget` (or listing a live tracker under Priority Trackers) resolves it.
+- **Concurrency limit for hover-driven scrape requests** (`tooltip_max_concurrent`, default 2;
+  range 1–6). On the discussion list, rapidly hovering across many discussions used to fire one
+  scrape request per hover and let each run to completion, piling up synchronous work on PHP
+  workers. A new client-side fetch manager now caps how many hover requests run at once; when you
+  hover past the limit, the newest hover aborts the oldest in-flight request (`AbortController`).
+  Leaving a discussion (or switching the hovered target) aborts that discussion's request, and
+  opening a discussion / navigating aborts all pending ones — so requests whose result won't be
+  shown are released instead of holding workers.
+- **Tooltip-specific tracker tuning** (both default 0 = inherit the global value, so no behavioural
+  change unless you set them):
+  - **Tooltip tracker timeout** (`tooltip_tracker_timeout`) — a per-tracker response timeout used
+    only for tooltip scrapes. Lowering it (e.g. 1 s) makes dead/slow trackers fail faster, so more
+    trackers fit inside the tooltip time budget — the most effective way to make the tooltip reach a
+    live tracker when private/dead trackers are listed first (in testing, a magnet that took ~6 s to
+    resolve with the global 2 s timeout resolved in ~1.2 s at 1 s).
+  - **Tooltip max trackers** (`tooltip_max_trackers`) — caps how many trackers the tooltip contacts
+    per magnet, independently of the in-topic card. The effective max-trackers **and the effective
+    per-tracker timeout** are both part of the scrape cache key, so a tooltip with a different cap or
+    timeout gets its own cache entry and never poisons the topic's full result (with *Check All
+    Trackers* on, a shorter timeout changes the aggregate). Note: the tooltip already falls through
+    trackers that don't respond, so the cap is a cost limit, not a reach-more-trackers knob — for
+    that, lower the timeout above.
 
 ### Notes
-- `hardened` ściśle weryfikuje certyfikaty TLS (`verify_peer`), więc trackery z zepsutym/
-  self-signed certem mogą pod nim przestać odpowiadać — dlatego `classic` zostaje domyślny.
-- `ScraperViaFix` ma dwa drobne usztywnienia z audytu AI: CSPRNG `random_int` w
-  `random_peer_id` (zamiast `str_shuffle`) oraz `str_starts_with` dla prefiksu bencode.
-- **Świadomie POMINIĘTE** (ryzykowne na vendored forku — wymagałyby korpusu testów realnych
-  trackerów): przepisanie HTTP na cURL/`CURLOPT_RESOLVE`, przepisanie pozycyjnego parsera
-  bencode, model wyjątków zamiast tablicy błędów, `strict_types`/całościowy lifting PHP-8.
-  Zweryfikowane na `http://flarum.localhost/`: oba silniki scrapują ten sam magnet do tego
-  samego wyniku (seeders=1), HTTP 200; test jednostkowy pin/validate (loopback/metadata/
-  prywatne/ULA v6 → blokada, publiczne v4+v6 → przepuszczone) ALL PASS.
+- Default behaviour is unchanged for existing installs: the topic still uses a 15 s budget and the
+  tooltip a 4 s budget; the concurrency limit defaults to 2. Only an admin who changes the new
+  settings sees different behaviour.
+- Aborting a hover request on the client caps the NUMBER of concurrent requests; it does not by
+  itself free a PHP worker already running a blocking tracker call (that work finishes server-side).
+  The result cache still means only the first hover per magnet pays.
+
+## [2.8.1] - 2026-06-18
+
+> Reworks the `hardened` engine onto **cURL** (`CURLOPT_RESOLVE`), makes it the DEFAULT, and
+> consolidates it as a subclass (no more scraper code duplication) — follow-up to the floxum audit
+> of the 2.8.0 release. **Frontend + PHP, no migrations** — rebuild assets:
+> `composer update` + `npm --prefix js run build` + `php flarum cache:clear`.
+
+### Added
+- **Scraper engine switch (`scraper_engine`: `hardened` | `classic`)** — new dropdown in the admin
+  panel (Scraper section).
+  - **`hardened` (DEFAULT)** = `Scrapeer\ScraperViaFix`, a **cURL**-based engine:
+    - **IP pinning** — the tracker host is resolved ONCE (A + AAAA) and range-validated
+      (`NO_PRIV_RANGE|NO_RES_RANGE`); HTTP/HTTPS uses **`CURLOPT_RESOLVE`** to connect to THAT IP
+      while SNI / certificate verification and the `Host` header stay on the original name. No second
+      DNS lookup = no rebinding window (for ALL hosts). `CURLOPT_PROTOCOLS` restricts to HTTP(S);
+      response size is capped.
+    - **IPv6** — UDP is dual-stack (`AF_INET6`) and connects to the pinned IP (classic UDP was
+      IPv4-only). Both HTTP paths (`/scrape` and `/announce`) go through the same pinned
+      `single_curl_request`. Respects `allow_private_trackers` (`set_allow_private()`).
+  - **`classic`** = the original `Scrapeer\Scraper` (`file_get_contents`, NO cURL dependency) — with
+    a documented residual rebinding window; choose it when cURL is unavailable.
+- **The default engine is now `hardened`** — closes the residual DNS-rebinding/SSRF out of the box
+  (floxum audit: a default of `classic` left the window open).
+
+### Changed
+- **No more scraper code duplication.** `ScraperViaFix` now **extends** `Scraper` and overrides ONLY
+  the three connection methods (`http_request`, `http_announce`, `udp_create_connection`) plus the
+  pinning helpers — **~314 lines instead of a full ~1000-line copy**. All of the BitTorrent
+  protocol / parsing logic has a single source of truth in `Scraper` (three methods + 3 helpers
+  there were widened to `protected`; no behavioural change). (audit: HIGH duplication)
+
+### Notes
+- `hardened` **requires the cURL extension** and strictly verifies TLS (`SSL_VERIFYPEER` +
+  `VERIFYHOST=2`), so trackers with a broken/self-signed certificate may stop responding — without
+  cURL, switch to `classic` (HTTP in hardened fails closed; UDP works without cURL).
+- Minor hardening from an AI audit (in `Scraper`, inherited): CSPRNG `random_int` in
+  `random_peer_id` (instead of `str_shuffle`); `str_starts_with` for the bencode prefix.
+- **Deliberately SKIPPED** (risky on a vendored fork): rewriting the positional bencode parser, an
+  exception model instead of an error array, `strict_types` / a wholesale PHP-8 lifting, a
+  Mithril-component frontend refactor. **Known, separate:** the vendored Scrapeer license =
+  CC BY-SA 3.0 (while `composer.json` = MIT) — to be resolved by packaging (a separate package) or a
+  rewrite; `NOTICE.md` documents it.
+- Verified locally: both engines scrape the same magnet to the same result (`seeders=1`), HTTP 200;
+  pin/validate unit test (loopback/metadata/private/ULA v6 → blocked; public v4+v6 → allowed) ALL PASS.
+
+## [2.8.0] - 2026-06-18
+
+> Adds an admin-selectable scraper engine: classic (as before) or hardened, which PINS the
+> resolved IP (closing the SSRF/DNS-rebinding window) and supports IPv6 over UDP.
+> **New file + frontend + PHP, no migrations** — rebuild assets: `composer update` +
+> `npm --prefix js run build` + `php flarum cache:clear`. Defaults to `classic` = no behavioural change.
+
+### Added
+- **Scraper engine switch (`scraper_engine`: `classic` | `hardened`).** New dropdown in the
+  admin panel (Scraper section). `classic` (default) = the original `Scrapeer\Scraper`, unchanged.
+  `hardened` = the new `Scrapeer\ScraperViaFix` (at this point `file_get_contents`-based + a
+  `build_pinned()` helper):
+  - **IP pinning** — the tracker host is resolved ONCE (A + AAAA), range-validated
+    (`NO_PRIV_RANGE|NO_RES_RANGE`), and the connection goes to THAT IP — no second DNS lookup, so
+    there is no window for rebinding between the check and the connection.
+  - **IPv6** — UDP dual-stack (`AF_INET6`); the classic UDP path was IPv4-only.
+  - HTTP/HTTPS — `/scrape` and `/announce` through a shared `build_pinned()` (Host + SNI/cert on
+    the original name; redirects re-pinned). Respects `allow_private_trackers`.
+- Minor AI-audit items in `ScraperViaFix`: CSPRNG `random_int` in `random_peer_id`; `str_starts_with`.
+
+> Note: in 2.8.1 the `hardened` engine moved to cURL and became the DEFAULT, and `ScraperViaFix`
+> is now a subclass of `Scraper` (no duplication). See the [2.8.1] entry.
 
 ## [2.7.1] - 2026-06-17
 
-> Floxum audit (runda 2) — rejestruje brakujący default białej listy hostów trackerów,
-> by opt-in guard SSRF był w pełni okablowany. Pozostałe findings rundy 2 są świadome
-> i udokumentowane niżej. **PHP only, bez migracji, bez zmian frontendu** →
-> `composer update` + `php flarum cache:clear`.
+> Floxum audit (round 2) — registers the missing default for the tracker host allowlist so the
+> opt-in SSRF guard is fully wired. The remaining round-2 findings are deliberate and documented
+> below. **PHP only, no migrations, no frontend change** → `composer update` + `php flarum cache:clear`.
 
 ### Fixed
-- **`scraper_host_allowlist` ma teraz zarejestrowany `->default('')`** w extend.php,
-  obok `priority_trackers`. Pole UI istniało już od 2.6.1 — to domyka brak rejestracji
-  defaultu, dla spójności z resztą ustawień. (floxum: brak `->default()` allowlisty)
+- **`scraper_host_allowlist` now has a registered `->default('')`** in extend.php, alongside
+  `priority_trackers`. The UI field already existed since 2.6.1 — this closes the missing default
+  registration, for consistency with the other settings. (floxum: missing `->default()` for the allowlist)
 
-### Notes — świadomie odłożone (udokumentowane)
-- **`MagnetRenderer` może zrobić INSERT dla starych postów przy renderze.** To celowy
-  lazy self-heal dla postów sprzed backfillu `EnsureMagnetRecords`; przejście na
-  read-only regresowałoby render starych postów (pokazywałyby „invalid" do czasu
-  `magnet:reparse`). Zostaje; `EnsureMagnetRecords` pozostaje główną ścieżką zapisu.
-  (floxum: zapisy DB podczas renderu)
-- **`generateToken()` utrwala świeży `token_salt`, gdy jest pusty.** Migracja
-  provisionuje salt przy instalacji, więc ta gałąź to bezpiecznik na ręczne skasowanie;
-  okno TOCTOU jest znikome, a self-heal jest lepszy niż wywracanie derywacji tokenu.
-  Zostaje. (floxum: zapis ustawień w generateToken)
-- Bez zmian (jak dotąd): synchroniczny scraping tooltipa (kolejka odłożona — sterownik
-  `sync`, cache łagodzi zimne trafienia), statyczny `generateToken` (hash MUSI zostać
-  bajtowo identyczny), surowa migracja `->change()`, body-wide MutationObserver
-  (leaf-skip dodany w 2.7.0; rescope zepsułby magnety w podglądzie kompozytora/modalach),
-  czysty JS. (floxum: powtórki)
+### Notes — deliberately deferred (documented)
+- **`MagnetRenderer` can do an INSERT for old posts on render.** This is an intentional lazy
+  self-heal for posts predating the `EnsureMagnetRecords` backfill; going read-only would regress
+  rendering of old posts (they'd show "invalid" until `magnet:reparse`). It stays; `EnsureMagnetRecords`
+  remains the primary write path. (floxum: DB writes during render)
+- **`generateToken()` persists a fresh `token_salt` when it is empty.** A migration provisions the
+  salt at install time, so this branch is a safeguard against a manual deletion; the TOCTOU window is
+  negligible and the self-heal is better than breaking token derivation. It stays. (floxum: settings
+  write in generateToken)
+- Unchanged (as before): the synchronous tooltip scrape (queue deferred — `sync` driver, the cache
+  softens cold hits), the static `generateToken` (the hash MUST stay byte-identical), the raw
+  `->change()` migration, the body-wide MutationObserver (leaf-skip added in 2.7.0; rescoping would
+  break magnets in the composer preview/modals), plain JS. (floxum: repeats)
 
 ## [2.7.0] - 2026-06-17
 

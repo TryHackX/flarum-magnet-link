@@ -111,6 +111,9 @@ app.initializers.add('tryhackx-magnet-link', () => {
         mainArea.addEventListener('mouseleave', () => {
             clearTimeout(hoverTimeout);
             tooltip.hide();
+            // Zwolnij workera: przerwij żądanie scrapingu tego tematu w locie
+            // (metoda B — abort przy opuszczeniu / zmianie najechanego tematu).
+            tooltip.cancel(discussionId);
         });
     };
 

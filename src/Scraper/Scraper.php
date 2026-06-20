@@ -55,7 +55,7 @@ class Scraper {
      *
      * @var int
      */
-    private $timeout;
+    protected $timeout;
 
     /**
      * Max number of HTTP(S) redirects to follow (TryHackX). 0 = none (safe
@@ -63,7 +63,7 @@ class Scraper {
      *
      * @var int
      */
-    private $max_redirects = 0;
+    protected $max_redirects = 0;
 
     /**
      * Optional callable(string $host): bool deciding whether a redirect target
@@ -71,7 +71,7 @@ class Scraper {
      *
      * @var callable|null
      */
-    private $host_validator = null;
+    protected $host_validator = null;
 
     /**
      * Sets the maximum number of HTTP(S) redirects to follow per request.
@@ -294,7 +294,7 @@ class Scraper {
      * @param int    $port Port number of the tracker, Default 80 (HTTP) or 443 (HTTPS).
      * @return string Request response.
      */
-    private function http_request( $query, $host, $port ) {
+    protected function http_request( $query, $host, $port ) {
         $url = $query;
         $redirects_left = $this->max_redirects;
         $response = false;
@@ -379,7 +379,7 @@ class Scraper {
      * @param string $name Header name (case-insensitive).
      * @return string Header value, or '' if absent.
      */
-    private function http_header_value( $headers, $name ) {
+    protected function http_header_value( $headers, $name ) {
         $name = strtolower( $name );
         $value = '';
         foreach ( $headers as $line ) {
@@ -401,7 +401,7 @@ class Scraper {
      * @param string $location Raw Location header value.
      * @return string Absolute http(s) URL.
      */
-    private function resolve_redirect_url( $base, $location ) {
+    protected function resolve_redirect_url( $base, $location ) {
         $location = trim( $location );
 
         if ( preg_match( '#^https?://#i', $location ) ) {
@@ -442,7 +442,7 @@ class Scraper {
      * @param string       $passkey Optional. Passkey provided in the scrape request.
      * @return string Request response.
      */
-    private function http_announce( $infohashes, $protocol, $host, $port, $passkey ) {
+    protected function http_announce( $infohashes, $protocol, $host, $port, $passkey ) {
         $tracker_url = $protocol . '://' . $host . ':' . $port . $passkey;
         $context = stream_context_create( array(
             'http' => array(
@@ -591,7 +591,7 @@ class Scraper {
      * @param int    $port Port number of the tracker, Default 80.
      * @return resource $socket Created and connected socket.
      */
-    private function udp_create_connection( $host, $port ) {
+    protected function udp_create_connection( $host, $port ) {
         if ( false === ( $socket = @socket_create( AF_INET, SOCK_DGRAM, SOL_UDP ) ) ) {
             throw new \Exception( "Couldn't create socket." );
         }
@@ -771,9 +771,15 @@ class Scraper {
     private function random_peer_id() {
         $identifier = '-SP0054-';
         $chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-        $peer_id = $identifier . substr( str_shuffle( $chars ), 0, 12 );
+        // CSPRNG (random_int) zamiast str_shuffle (nie-kryptograficzny PRNG) — modern
+        // best practice (audyt). Format peer_id zachowany: 8-bajtowy prefiks + 12 znaków.
+        $max = strlen( $chars ) - 1;
+        $suffix = '';
+        for ( $i = 0; $i < 12; $i++ ) {
+            $suffix .= $chars[ random_int( 0, $max ) ];
+        }
 
-        return $peer_id;
+        return $identifier . $suffix;
     }
 
     /**

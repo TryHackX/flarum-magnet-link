@@ -23,15 +23,17 @@ class DiscussionMagnetsController implements RequestHandlerInterface
     use ResolvesRouteParam;
 
     /**
-     * Wall-clock budget (seconds) for scraping ALL magnets shown in one tooltip.
+     * Domyślny budżet czasu (sek.) na scrape WSZYSTKICH magnetów w jednym
+     * tooltipie — używany, gdy admin nie nadpisał `tooltip_scrape_budget`.
      * Trzymany krótko, bo scrape biegnie SYNCHRONICZNIE na workerze PHP-FPM przy
      * najechaniu myszką (audyt: synchroniczny scraping wiąże workera). Zimny hover
      * zajmie workera najwyżej na tyle sekund; cache (cache_ttl) sprawia, że płaci
      * to tylko PIERWSZY hover dla danego magnetu. Pełny zestaw danych ma i tak
-     * widok w temacie (InfoController — bez współdzielonego deadline, własny
-     * HARD_TIME_BUDGET), więc skrócenie budżetu tooltipa nie psuje dokładności.
+     * widok w temacie (InfoController — własny, większy budżet topic_scrape_budget),
+     * więc krótszy budżet tooltipa nie psuje dokładności. Admin może go wydłużyć
+     * w panelu, ale twardo do sufitu TrackerScraper::HARD_TIME_BUDGET (anty-DoS).
      */
-    private const TOOLTIP_SCRAPE_BUDGET = 4.0;
+    private const DEFAULT_TOOLTIP_SCRAPE_BUDGET = 4;
 
     public function __construct(
         protected SettingsRepositoryInterface $settings,
@@ -164,10 +166,28 @@ class DiscussionMagnetsController implements RequestHandlerInterface
 
             // Scrapuj tylko faktycznie pokazywane magnety, ze wspólnym budżetem
             // czasu na całe żądanie — żeby jedno najechanie myszką nie mogło
-            // zająć workera na długo.
-            $deadline = microtime(true) + self::TOOLTIP_SCRAPE_BUDGET;
+            // zająć workera na długo. Budżet konfigurowalny przez admina
+            // (tooltip_scrape_budget), twardo ograniczony sufitem
+            // TrackerScraper::HARD_TIME_BUDGET (anty-DoS).
+            // Floor = 2 (nie 1): przy budżecie 1 s wewnętrzny guard `remaining < 1.0`
+            // w TrackerScraper::computeScrape przerywa pętlę zanim skontaktuje
+            // CHOĆBY JEDEN tracker (0,14 s, zero prób) — 1 s to martwa strefa.
+            $budget = (int) $this->settings->get('tryhackx-magnet-link.tooltip_scrape_budget', self::DEFAULT_TOOLTIP_SCRAPE_BUDGET);
+            $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
+            $deadline = microtime(true) + $budget;
+
+            // Tooltipowe override'y trackerów (0 = dziedzicz globalne ustawienie):
+            //  - tooltip_max_trackers  → ile trackerów odpytać w dymku ("max odpytań"),
+            //  - tooltip_tracker_timeout → per-tracker timeout (niższy = więcej trackerów
+            //    zdąży się odpytać w budżecie, większa szansa na żywy tracker).
+            // Inny limit niż w temacie = osobny klucz cache (bez zatruwania tematu).
+            $ttMax = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_trackers', 0);
+            $ttTimeout = (int) $this->settings->get('tryhackx-magnet-link.tooltip_tracker_timeout', 0);
+            $maxOverride = $ttMax > 0 ? $ttMax : null;
+            $timeoutOverride = $ttTimeout > 0 ? $ttTimeout : null;
+
             foreach ($magnets as &$magnet) {
-                $magnet['scrape'] = $this->scraper->scrapeForMagnet($magnet['_model'], $deadline);
+                $magnet['scrape'] = $this->scraper->scrapeForMagnet($magnet['_model'], $deadline, false, $maxOverride, $timeoutOverride);
                 unset($magnet['_model']);
             }
             unset($magnet);

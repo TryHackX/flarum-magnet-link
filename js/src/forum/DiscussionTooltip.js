@@ -1,4 +1,5 @@
 import app from 'flarum/forum/app';
+import HoverFetchManager from './HoverFetchManager';
 
 /**
  * Tooltip wyświetlający statystyki magnet linków na liście dyskusji
@@ -13,6 +14,10 @@ export default class DiscussionTooltip {
         this.activeDiscussionId = null;
         // Licznik generacji show() - zapobiega race condition
         this.showGeneration = 0;
+        // Ogranicznik współbieżności hoverów (metoda B): max równoczesnych żądań
+        // (admin: tooltip_max_concurrent, domyślnie 2) + abort-oldest + abort przy
+        // mouseleave/wejściu w temat. Chroni workera PHP-FPM przed pile-upem.
+        this.fetchManager = new HoverFetchManager(app.forum.attribute('magnetTooltipMaxConcurrent'));
         // Tworzy element tooltipa
         this.createTooltipElement();
         // Globalne listenery do ukrywania tooltipa
@@ -32,9 +37,12 @@ export default class DiscussionTooltip {
      * Globalne listenery - ukryj tooltip przy kliknięciu, scrollu, nawigacji
      */
     setupGlobalListeners() {
-        // Ukryj przy dowolnym kliknięciu (np. kliknięcie w temat)
+        // Ukryj przy dowolnym kliknięciu (np. kliknięcie w temat). Wejście w temat
+        // przerywa też WSZYSTKIE oczekujące żądania hovera (zwalnia workery) — i tak
+        // chowamy dymek, więc ich wynik nie jest potrzebny.
         document.addEventListener('click', (e) => {
             this.hide();
+            this.fetchManager.abortAll();
             // Kliknięcie w przycisk refresh listy dyskusji - wyczyść cache tooltipa
             if (e.target.closest('.item-refresh')) {
                 this.clearCache();
@@ -49,7 +57,20 @@ export default class DiscussionTooltip {
         // Ukryj przy nawigacji wstecz/naprzód (SPA). Nawigację przez kliknięcie
         // linku obsługuje już globalny listener 'click' powyżej, więc tu wystarczy
         // popstate — bez monkey-patcha globalnego History.prototype.
-        window.addEventListener('popstate', () => this.hide());
+        window.addEventListener('popstate', () => {
+            this.hide();
+            this.fetchManager.abortAll();
+        });
+    }
+
+    /** Przerwij oczekujące żądanie hovera dla danej dyskusji (mouseleave/zmiana targetu). */
+    cancel(discussionId) {
+        this.fetchManager.abort(discussionId);
+    }
+
+    /** Przerwij wszystkie oczekujące żądania hovera (wejście w temat / nawigacja). */
+    cancelAll() {
+        this.fetchManager.abortAll();
     }
 
     /**
@@ -98,6 +119,9 @@ export default class DiscussionTooltip {
             // Ponownie pozycjonuj po zmianie zawartości
             this.positionTooltip(targetElement);
         } catch (error) {
+            // Przerwane (mouseleave / zmiana targetu / wejście w temat) — to NIE
+            // błąd: nie dotykaj UI (mógł je przejąć nowszy hover albo już schowane).
+            if (error && error.name === 'AbortError') return;
             if (this.showGeneration !== generation) return;
             this.hide();
         }
@@ -145,24 +169,28 @@ export default class DiscussionTooltip {
             }
         }
 
+        const url = app.forum.attribute('apiUrl') + '/magnet/discussion/' + discussionId;
+
         let response;
         try {
-            response = await app.request({
-                method: 'GET',
-                url: app.forum.attribute('apiUrl') + '/magnet/discussion/' + discussionId,
-            });
+            // Przez ogranicznik współbieżności (metoda B). Natywny fetch zwraca też
+            // body 403 jako {success:false, error:<typ>} (kontroler dla gości /
+            // niepotwierdzonych / bez permisji), więc show() wyrenderuje komunikat
+            // ("You must be logged in…") zamiast migać "Loading...".
+            response = await this.fetchManager.request(discussionId, url);
         } catch (error) {
-            // Kontroler zwraca {success:false, error:<typ>} z kodem 403 dla
-            // gości / niepotwierdzonych / bez permisji. Chcemy ten obiekt
-            // zamiast wyjątku, żeby show() mógł wyrenderować komunikat
-            // ("You must be logged in…") w miejsce migającego "Loading...".
-            response = (error && error.response) || {
-                success: false,
-                error: 'load_failed',
-            };
+            // Przerwane (mouseleave / zmiana targetu / wejście w temat) — przepuść
+            // dalej jako AbortError, żeby show() nic nie renderowało i NIE zatruwało
+            // cache pustym wynikiem po przerwaniu.
+            if (error && error.name === 'AbortError') {
+                throw error;
+            }
+            // Twardy błąd sieci — sentinel jak dotąd.
+            response = { success: false, error: 'load_failed' };
         }
 
-        // Zapisz do cache (również odpowiedzi błędne — cache ma timeout).
+        // Zapisz do cache (również odpowiedzi błędne — cache ma timeout). Aborty tu
+        // nie docierają (rzucone wyżej), więc nie cache'ujemy pustki po przerwaniu.
         if (this.cacheEnabled()) {
             this.tooltipCache.set(discussionId, {
                 data: response,

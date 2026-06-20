@@ -75,10 +75,12 @@ return [
         ->default('tryhackx-magnet-link.guest_visible', false)
         ->default('tryhackx-magnet-link.activated_only', false)
         ->default('tryhackx-magnet-link.scraper_enabled', true)
-        // Silnik scrapera: 'classic' (Scrapeer\Scraper, jak dotąd) lub 'hardened'
-        // (Scrapeer\ScraperViaFix — pinowanie IP vs DNS-rebinding + IPv6 dla UDP).
-        // Domyślnie 'classic' = bez zmiany zachowania dla istniejących instalacji.
-        ->default('tryhackx-magnet-link.scraper_engine', 'classic')
+        // Silnik scrapera: 'hardened' (Scrapeer\ScraperViaFix — cURL + pinowanie IP
+        // zamykające DNS-rebinding/SSRF + IPv6 dla UDP; DOMYŚLNY) lub 'classic'
+        // (Scrapeer\Scraper — file_get_contents, bez cURL; rezydualne okno rebindingu).
+        // Hardened wymaga rozszerzenia cURL; bez niego scrape HTTP zawiedzie (UDP działa)
+        // — wtedy admin może wybrać 'classic'.
+        ->default('tryhackx-magnet-link.scraper_engine', 'hardened')
         ->default('tryhackx-magnet-link.http_only', false)
         // Domyślnie blokujemy trackery wskazujące na adresy prywatne/wewnętrzne
         // (ochrona przed SSRF). Włącz tylko jeśli świadomie hostujesz tracker w LAN.
@@ -87,6 +89,10 @@ return [
         ->default('tryhackx-magnet-link.display_type', 'average')
         ->default('tryhackx-magnet-link.tracker_timeout', 2)
         ->default('tryhackx-magnet-link.max_trackers', 0)
+        // Budżet czasu (sek.) scrapowania dla widoku w TEMACIE (InfoController,
+        // karta w poście). Twardy sufit = TrackerScraper::HARD_TIME_BUDGET (30 s);
+        // admin może wydłużyć/skrócić w tym zakresie.
+        ->default('tryhackx-magnet-link.topic_scrape_budget', 15)
         // Liczba przekierowań HTTP do podążenia przy scrapowaniu (0 = brak; np.
         // tracker za Cloudflare robi http→https). Każdy hop walidowany guardem SSRF.
         ->default('tryhackx-magnet-link.scraper_max_redirects', 0)
@@ -123,6 +129,22 @@ return [
         ->default('tryhackx-magnet-link.self_interval', 1)
         ->default('tryhackx-magnet-link.tooltip_enabled', true)
         ->default('tryhackx-magnet-link.tooltip_max_magnets', 3)
+        // Budżet czasu (sek.) scrapowania WSPÓŁDZIELONY przez wszystkie magnety
+        // jednego dymka listy (DiscussionMagnetsController). Krótki, bo scrape
+        // wiąże workera przy hoverze; twardy sufit = HARD_TIME_BUDGET (30 s).
+        ->default('tryhackx-magnet-link.tooltip_scrape_budget', 4)
+        // Limit RÓWNOCZESNYCH żądań scrapingu z najeżdżania na listę (frontend,
+        // metoda B): ponad limit nowy hover przerywa najstarsze (abort-oldest).
+        // Chroni workery PHP-FPM przed pile-upem przy szybkim przeglądaniu listy.
+        ->default('tryhackx-magnet-link.tooltip_max_concurrent', 2)
+        // Tooltipowe override'y trackerów (0 = dziedzicz globalne max_trackers /
+        // tracker_timeout). Pozwalają stroić dymek niezależnie od tematu:
+        //  - tooltip_max_trackers: ile trackerów odpytać w dymku ("max odpytań"),
+        //  - tooltip_tracker_timeout: per-tracker timeout w dymku (niższy = więcej
+        //    trackerów zdąży w budżecie). max_trackers wchodzi do klucza cache,
+        //    więc inny limit w dymku ma osobny wpis (nie zatruwa tematu).
+        ->default('tryhackx-magnet-link.tooltip_max_trackers', 0)
+        ->default('tryhackx-magnet-link.tooltip_tracker_timeout', 0)
         ->default('tryhackx-magnet-link.tooltip_show_permission_errors', true)
         ->default('tryhackx-magnet-link.rename_enabled', true)
         // Styl karty na desktopie: 'standard' (jak dotąd) lub 'mobile'
@@ -148,6 +170,12 @@ return [
         })
         ->serializeToForum('magnetTooltipShowPermissionErrors', 'tryhackx-magnet-link.tooltip_show_permission_errors', function ($value) {
             return (bool) $value;
+        })
+        ->serializeToForum('magnetTooltipMaxConcurrent', 'tryhackx-magnet-link.tooltip_max_concurrent', function ($value) {
+            // Clamp [1,6]: frontend (HoverFetchManager) używa tego jako limitu
+            // równoczesnych żądań hovera; > kilku to nadużycie workerów.
+            $n = (int) $value;
+            return $n > 0 ? min($n, 6) : 2;
         })
         ->serializeToForum('magnetRenameEnabled', 'tryhackx-magnet-link.rename_enabled', function ($value) {
             return (bool) $value;
