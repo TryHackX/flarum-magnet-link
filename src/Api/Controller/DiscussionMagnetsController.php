@@ -115,48 +115,10 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 }
             }
 
-            // Zbierz unikalne (po tokenie) referencje magnetów z obu form tagu
-            // w jednym przebiegu (audyt #4 — koniec z dwoma bliźniaczymi blokami).
-            $refs = $this->collectTokenRefs($posts);
-
-            // Doładuj wszystkie wiersze magnetów JEDNYM zapytaniem zamiast
-            // findByToken per token w pętli (audyt #2 — koniec z N+1).
-            $tokens = array_column($refs, 'token');
-            $models = empty($tokens)
-                ? collect()
-                : MagnetLink::whereIn('token', $tokens)->get()->keyBy('token');
-
-            $magnets = [];
-            foreach ($refs as $ref) {
-                $magnetLink = $models->get($ref['token']);
-                if (! $magnetLink) {
-                    // Wiersza brak (np. import bez re-parse) — pomijamy; render
-                    // utworzy go leniwie przy otwarciu wątku.
-                    continue;
-                }
-
-                // Własna nazwa z mapy (#3 — bez N+1).
-                $displayName = $customNames[$magnetLink->id . ':' . $ref['post_id']] ?? $magnetLink->name;
-
-                $magnetData = [
-                    'token' => $magnetLink->token,
-                    'name' => $displayName,
-                    'info_hash' => $magnetLink->info_hash,
-                    'click_count' => $magnetLink->click_count,
-                ];
-
-                // Rozmiar pliku
-                $fileSize = $magnetLink->getFileSize();
-                if ($fileSize !== null) {
-                    $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
-                }
-
-                // Scrape odłożony do czasu obcięcia listy do limitu tooltipa
-                // (żeby nie scrapować magnetów, które i tak odrzucimy).
-                $magnetData['_model'] = $magnetLink;
-
-                $magnets[] = $magnetData;
-            }
+            // Zbierz referencje magnetów z postów, doładuj ich wiersze JEDNYM
+            // zapytaniem (bez N+1) i zbuduj listę danych tooltipa — patrz
+            // collectMagnetData(). Każdy wpis niesie '_model' do scrapowania niżej.
+            $magnets = $this->collectMagnetData($posts, $customNames);
 
             // Ogranicz liczbę magnetów w tooltipie PRZED scrapowaniem.
             $maxMagnets = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_magnets', 3);
@@ -164,33 +126,9 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 $magnets = array_slice($magnets, 0, $maxMagnets);
             }
 
-            // Scrapuj tylko faktycznie pokazywane magnety, ze wspólnym budżetem
-            // czasu na całe żądanie — żeby jedno najechanie myszką nie mogło
-            // zająć workera na długo. Budżet konfigurowalny przez admina
-            // (tooltip_scrape_budget), twardo ograniczony sufitem
-            // TrackerScraper::HARD_TIME_BUDGET (anty-DoS).
-            // Floor = 2 (nie 1): przy budżecie 1 s wewnętrzny guard `remaining < 1.0`
-            // w TrackerScraper::computeScrape przerywa pętlę zanim skontaktuje
-            // CHOĆBY JEDEN tracker (0,14 s, zero prób) — 1 s to martwa strefa.
-            $budget = (int) $this->settings->get('tryhackx-magnet-link.tooltip_scrape_budget', self::DEFAULT_TOOLTIP_SCRAPE_BUDGET);
-            $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
-            $deadline = microtime(true) + $budget;
-
-            // Tooltipowe override'y trackerów (0 = dziedzicz globalne ustawienie):
-            //  - tooltip_max_trackers  → ile trackerów odpytać w dymku ("max odpytań"),
-            //  - tooltip_tracker_timeout → per-tracker timeout (niższy = więcej trackerów
-            //    zdąży się odpytać w budżecie, większa szansa na żywy tracker).
-            // Inny limit niż w temacie = osobny klucz cache (bez zatruwania tematu).
-            $ttMax = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_trackers', 0);
-            $ttTimeout = (int) $this->settings->get('tryhackx-magnet-link.tooltip_tracker_timeout', 0);
-            $maxOverride = $ttMax > 0 ? $ttMax : null;
-            $timeoutOverride = $ttTimeout > 0 ? $ttTimeout : null;
-
-            foreach ($magnets as &$magnet) {
-                $magnet['scrape'] = $this->scraper->scrapeForMagnet($magnet['_model'], $deadline, false, $maxOverride, $timeoutOverride);
-                unset($magnet['_model']);
-            }
-            unset($magnet);
+            // Scrapuj tylko faktycznie pokazywane magnety — wspólny budżet czasu na
+            // całe żądanie + tooltipowe override'y trackerów (patrz scrapeMagnets()).
+            $magnets = $this->scrapeMagnets($magnets);
 
             return new JsonResponse([
                 'success' => true,
@@ -207,6 +145,100 @@ class DiscussionMagnetsController implements RequestHandlerInterface
                 'message' => 'An error occurred'
             ], 500);
         }
+    }
+
+    /**
+     * Z postów dyskusji zbierz referencje magnetów (collectTokenRefs), doładuj ich
+     * wiersze JEDNYM zapytaniem (bez N+1) i zbuduj listę danych tooltipa. Każdy wpis
+     * niesie '_model' (MagnetLink) do scrapowania PO obcięciu listy do limitu —
+     * usuwany w scrapeMagnets(). Własna nazwa brana z mapy (#3 — bez N+1).
+     *
+     * @param iterable<\Flarum\Post\Post> $posts
+     * @param array<string, string> $customNames  klucz "magnetId:postId" => custom_name
+     * @return array<int, array<string, mixed>>
+     */
+    private function collectMagnetData(iterable $posts, array $customNames): array
+    {
+        // Obie formy tagu w jednym przebiegu (audyt #4 — koniec z bliźniaczymi blokami).
+        $refs = $this->collectTokenRefs($posts);
+
+        // Doładuj wszystkie wiersze magnetów JEDNYM zapytaniem zamiast findByToken
+        // per token w pętli (audyt #2 — koniec z N+1).
+        $tokens = array_column($refs, 'token');
+        $models = empty($tokens)
+            ? collect()
+            : MagnetLink::whereIn('token', $tokens)->get()->keyBy('token');
+
+        $magnets = [];
+        foreach ($refs as $ref) {
+            $magnetLink = $models->get($ref['token']);
+            if (! $magnetLink) {
+                // Wiersza brak (np. import bez re-parse) — pomijamy; render utworzy
+                // go leniwie przy otwarciu wątku.
+                continue;
+            }
+
+            // Własna nazwa z mapy (#3 — bez N+1).
+            $displayName = $customNames[$magnetLink->id . ':' . $ref['post_id']] ?? $magnetLink->name;
+
+            $magnetData = [
+                'token' => $magnetLink->token,
+                'name' => $displayName,
+                'info_hash' => $magnetLink->info_hash,
+                'click_count' => $magnetLink->click_count,
+            ];
+
+            // Rozmiar pliku
+            $fileSize = $magnetLink->getFileSize();
+            if ($fileSize !== null) {
+                $magnetData['file_size_formatted'] = $magnetLink->getFormattedFileSize();
+            }
+
+            // Scrape odłożony do czasu obcięcia listy do limitu tooltipa (żeby nie
+            // scrapować magnetów, które i tak odrzucimy).
+            $magnetData['_model'] = $magnetLink;
+
+            $magnets[] = $magnetData;
+        }
+
+        return $magnets;
+    }
+
+    /**
+     * Doscrapuj listę magnetów tooltipa ze WSPÓLNYM budżetem czasu na całe żądanie
+     * (anty-DoS — jeden hover nie zajmie workera na długo) i tooltipowymi override'ami
+     * trackerów. Usuwa '_model' z każdego wpisu, dokłada 'scrape'.
+     *
+     * @param array<int, array<string, mixed>> $magnets
+     * @return array<int, array<string, mixed>>
+     */
+    private function scrapeMagnets(array $magnets): array
+    {
+        // Budżet konfigurowalny (tooltip_scrape_budget), twardo ograniczony sufitem
+        // TrackerScraper::HARD_TIME_BUDGET. Floor = 2 (nie 1): przy budżecie 1 s
+        // wewnętrzny guard `remaining < 1.0` w computeScrape przerywa pętlę zanim
+        // skontaktuje CHOĆBY JEDEN tracker (0,14 s, zero prób) — 1 s to martwa strefa.
+        $budget = (int) $this->settings->get('tryhackx-magnet-link.tooltip_scrape_budget', self::DEFAULT_TOOLTIP_SCRAPE_BUDGET);
+        $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
+        $deadline = microtime(true) + $budget;
+
+        // Tooltipowe override'y trackerów (0 = dziedzicz globalne ustawienie):
+        //  - tooltip_max_trackers  → ile trackerów odpytać w dymku ("max odpytań"),
+        //  - tooltip_tracker_timeout → per-tracker timeout (niższy = więcej trackerów
+        //    zdąży się odpytać w budżecie, większa szansa na żywy tracker).
+        // Inny limit/timeout niż w temacie = osobny klucz cache (bez zatruwania tematu).
+        $ttMax = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_trackers', 0);
+        $ttTimeout = (int) $this->settings->get('tryhackx-magnet-link.tooltip_tracker_timeout', 0);
+        $maxOverride = $ttMax > 0 ? $ttMax : null;
+        $timeoutOverride = $ttTimeout > 0 ? $ttTimeout : null;
+
+        foreach ($magnets as &$magnet) {
+            $magnet['scrape'] = $this->scraper->scrapeForMagnet($magnet['_model'], $deadline, false, $maxOverride, $timeoutOverride);
+            unset($magnet['_model']);
+        }
+        unset($magnet);
+
+        return $magnets;
     }
 
     /**

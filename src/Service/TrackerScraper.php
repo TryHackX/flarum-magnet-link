@@ -515,11 +515,13 @@ class TrackerScraper
     {
         try {
             // Wybór silnika scrapera (ustawienie admina — przełącznik):
-            //  - 'classic'  → Scrapeer\Scraper (jak dotąd; SSRF-guard hostIsPublic niżej),
-            //  - 'hardened' → Scrapeer\ScraperViaFix (PINOWANIE IP zamykające DNS-rebinding
-            //    + dual-stack IPv6 dla UDP). Domyślnie 'classic' = bez zmiany zachowania.
-            $engine = (string) $this->settings->get('tryhackx-magnet-link.scraper_engine', 'classic');
-            $scraper = $engine === 'hardened' ? new ScraperViaFix() : new Scraper();
+            //  - 'hardened' (DOMYŚLNY) → Scrapeer\ScraperViaFix (PINOWANIE IP zamykające
+            //    DNS-rebinding + dual-stack IPv6 dla UDP),
+            //  - 'classic' → Scrapeer\Scraper (file_get_contents; SSRF-guard hostIsPublic niżej).
+            // Fallback MUSI być 'hardened' — spójny z ->default() w extend.php; gdyby było
+            // 'classic', brak wpisu w ustawieniach po cichu degradowałby do mniej bezpiecznego silnika.
+            $engine = (string) $this->settings->get('tryhackx-magnet-link.scraper_engine', 'hardened');
+            $scraper = $engine === 'classic' ? new Scraper() : new ScraperViaFix();
             $scraper->set_max_redirects($maxRedirects);
             if ($maxRedirects > 0) {
                 // Waliduj KAŻDY hop przekierowania tą samą polityką co host

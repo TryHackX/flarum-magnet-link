@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-06-20
+
+> Post-release follow-up from an external code review: a fail-secure default fix and an internal
+> controller refactor. **PHP only — no migrations, no frontend rebuild** → `composer update` +
+> `php flarum cache:clear`.
+
+### Fixed
+- **The scraper engine now fails secure when the setting is absent.** `TrackerScraper::scrapeSingle()`
+  read `scraper_engine` with a PHP-level fallback of `'classic'`, contradicting the registered default
+  of `'hardened'` (since 2.8.1). If the stored setting were ever missing, the scraper would silently
+  pick the *less*-hardened engine. The fallback is now `'hardened'` and the choice is fail-secure: only
+  an explicit `'classic'` selects the classic engine; anything else uses hardened.
+
+### Changed
+- **`DiscussionMagnetsController::handle()` split into smaller methods.** The magnet-list assembly
+  (token refs → batch model load → payload build) and the budgeted scrape loop were extracted into
+  private `collectMagnetData()` / `scrapeMagnets()` helpers. Pure refactor — the API response shape is
+  byte-identical (verified).
+
 ## [2.9.0] - 2026-06-20
 
 > Separates the tracker-scrape time budgets for the discussion-list tooltip and the open-topic
