@@ -27,6 +27,8 @@ duplication** with `Scraper.php`:
 - **IP pinning** (`resolve_pinned_ip()`) — the tracker host is resolved + range-validated
   once and the connection is forced to that exact IP, closing the DNS-rebinding / SSRF
   window. Dual-stack (A + AAAA); `set_allow_private()` mirrors `allow_private_trackers`.
+  The range check itself is `TryHackX\MagnetLink\Support\PublicIp::isPublic()` (outside
+  this subtree, MIT), shared with `TrackerScraper::hostIsPublic()`.
 - **cURL** for HTTP/HTTPS via `CURLOPT_RESOLVE` (TLS SNI/certificate verified against the
   original hostname; `CURLOPT_PROTOCOLS` limited to HTTP(S); bounded response size).
 - **Dual-stack UDP** (`AF_INET6`) connecting to the pinned IP.

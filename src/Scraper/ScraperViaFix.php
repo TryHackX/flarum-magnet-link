@@ -115,7 +115,9 @@ class ScraperViaFix extends Scraper {
      * @return bool
      */
     private function ip_is_public( $ip ) {
-        return false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE );
+        // Wspólna, pełniejsza kontrola zakresów (CGNAT, NAT64/6to4/Teredo, multicast…) —
+        // ta sama, której używa TrackerScraper::hostIsPublic().
+        return \TryHackX\MagnetLink\Support\PublicIp::isPublic( (string) $ip );
     }
 
     /**
@@ -185,7 +187,7 @@ class ScraperViaFix extends Scraper {
         $http_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
         $curl_errno = curl_errno( $ch );
         $curl_error = curl_error( $ch );
-        curl_close( $ch );
+        unset( $ch ); // zwalnia uchwyt (curl_close() to od PHP 8.5 przestarzała no-op)
 
         // Tolerujemy TYLKO celowe przerwanie zapisu (ucięcie zbyt dużej odpowiedzi).
         // Każdy inny błąd sieciowy to wyjątek.

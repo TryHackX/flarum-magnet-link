@@ -9,16 +9,14 @@ before the extension was enabled.
 
 ## 🚀 Versions & Compatibility
 
-This extension is developed in parallel to support both legacy and modern
-Flarum installations:
+- **Version 2.x** — requires **Flarum 2.0.2+** (PHP 8.3+). **Actively developed.**
+- **Version 1.x** (Flarum 1.8) — **discontinued and no longer published.**
 
-- **Version 2.x** — Fully compatible with the latest Flarum 2.x routing and
-  frontend architecture. **Actively developed.**
-- **Version 1.x** — Supports legacy Flarum 1.8.0 and above. **No longer
-  actively developed** — stays available for legacy installs but won't
-  receive new features.
+> **Latest highlights (2.10.0):** the scraper's SSRF guard also refuses carrier-grade NAT,
+> benchmarking and multicast ranges and IPv6 forms that embed or tunnel IPv4 (NAT64, 6to4,
+> Teredo); PHP 8.5 ready.
 
-> **Latest highlights (2.9.0):**
+> **Highlights of 2.9.0:**
 > - **Hardened scraper engine (now the default)** — a cURL engine that pins the
 >   resolved tracker IP, closing the DNS-rebinding / SSRF window for HTTP(S) and UDP
 >   (strict TLS, IPv6, bounded response, re-validated redirects). A *Classic*

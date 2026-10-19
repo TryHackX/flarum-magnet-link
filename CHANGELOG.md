@@ -10,6 +10,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-10-20
+
+> **PHP only — no migrations, no frontend rebuild** → `composer update` + `php flarum cache:clear`.
+
+### Security
+- **Tighter SSRF range check for tracker scraping.** Both the guard
+  (`TrackerScraper::hostIsPublic()`) and the hardened engine's IP pinning
+  (`ScraperViaFix`) relied on PHP's `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE`,
+  which lets through carrier-grade NAT (`100.64.0.0/10`), `192.0.0.0/24`, benchmarking
+  (`198.18.0.0/15`), multicast, and IPv6 forms that embed or tunnel an IPv4 address
+  (IPv4-mapped/compatible, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`, Teredo `2001::/32`),
+  plus ULA, link-local and multicast IPv6. A tracker URL in a post could point the scraper
+  at those. Both now share one stricter check, `Support\PublicIp::isPublic()`.
+  `allow_private_trackers` still lifts it on purpose.
+
+### Fixed
+- `POST /magnet/click` and `/magnet/rename` with a non-string `token` or `custom_name`
+  (e.g. an array in the JSON body) answered with a server error; they now return the
+  normal validation error.
+- No more `curl_close()` (a deprecated no-op since PHP 8.5) in the hardened engine.
+
+### Changed
+- Requires Flarum `^2.0.2`. The discontinued 1.x line (Flarum 1.8) is no longer
+  published: its branch and tag were removed from the repository.
+
 ## [2.9.1] - 2026-06-20
 
 > Post-release follow-up from an external code review: a fail-secure default fix and an internal

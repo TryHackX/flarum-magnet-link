@@ -41,7 +41,7 @@ class RenameController implements RequestHandlerInterface
             }
 
             $body = $request->getParsedBody();
-            $token = $body['token'] ?? '';
+            $token = is_string($body['token'] ?? null) ? $body['token'] : '';
             $postId = isset($body['post_id']) ? (int) $body['post_id'] : null;
 
             // Walidacja tokena
@@ -99,7 +99,9 @@ class RenameController implements RequestHandlerInterface
             }
 
             // POST - ustaw niestandardową nazwę
-            $customName = trim($body['custom_name'] ?? '');
+            // Only a string counts as a name: an array/object would make trim() throw a
+            // TypeError (not caught below, so a 500 instead of a validation error).
+            $customName = is_string($body['custom_name'] ?? null) ? trim($body['custom_name']) : '';
             if (empty($customName) || strlen($customName) > 500) {
                 return new JsonResponse([
                     'success' => false,

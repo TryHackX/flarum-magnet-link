@@ -40,7 +40,7 @@ class ClickController implements RequestHandlerInterface
 
             // Pobierz dane z body
             $body = $request->getParsedBody();
-            $token = $body['token'] ?? '';
+            $token = is_string($body['token'] ?? null) ? $body['token'] : '';
             $postId = isset($body['post_id']) ? (int) $body['post_id'] : null;
 
             // Walidacja tokena

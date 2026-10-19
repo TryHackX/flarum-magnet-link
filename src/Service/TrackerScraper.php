@@ -7,6 +7,7 @@ use Illuminate\Contracts\Cache\Repository;
 use Scrapeer\Scraper;
 use Scrapeer\ScraperViaFix;
 use TryHackX\MagnetLink\Model\MagnetLink;
+use TryHackX\MagnetLink\Support\PublicIp;
 
 /**
  * Central tracker-scraping service shared by InfoController and
@@ -498,8 +499,8 @@ class TrackerScraper
         }
 
         foreach ($ips as $ip) {
-            if (! filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
-                return false; // at least one resolved address is private/reserved
+            if (! PublicIp::isPublic($ip)) {
+                return false; // at least one resolved address is private/reserved/internal
             }
         }
 
