@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.2] - 2026-10-20
+
+> **No migrations, no frontend change** → `composer update` + `php flarum cache:clear`.
+
+### Security
+- **Notification emails no longer carry magnet links.** Flarum's notification emails quote
+  the post: the plain-text part its *source* — the whole `[magnet]magnet:?…[/magnet]` link —
+  and the HTML part its rendered card. Their recipients (followers of the discussion,
+  mentioned users) are chosen by the notification, not by the *View magnet links*
+  permission: a suspended member, who gets only guest rights, still received reply emails
+  with the link, and so would everyone outside the group if the permission were narrowed.
+  Every outgoing email now has its magnet links replaced by a short note pointing to the
+  post (both parts; in the HTML part this also replaces the card's "Loading…", which never
+  worked in a mail client). The link is only ever handed out by the permission-checked API.
+
 ## [2.10.1] - 2026-10-20
 
 > **No migrations** (the built JS ships in `js/dist`) → `composer update` + `php flarum cache:clear`.

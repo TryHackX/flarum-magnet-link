@@ -203,3 +203,7 @@ tryhackx-magnet-link:
         refresh_limit:
             cooldown: "Ten magnet został przed chwilą odświeżony — możesz odświeżyć ponownie za {seconds} s. Wszyscy już widzą najnowszy wynik."
             quota: "Osiągnięto limit odświeżeń. Spróbuj ponownie za {seconds} s."
+
+    # Po stronie serwera: zastępuje link magnet w e-mailach z powiadomieniami
+    email:
+        magnet_hidden: "Link magnet — otwórz post na forum, aby go pobrać"

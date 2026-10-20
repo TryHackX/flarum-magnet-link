@@ -12,7 +12,11 @@ before the extension was enabled.
 - **Version 2.x** — requires **Flarum 2.0.2+** (PHP 8.3+). **Actively developed.**
 - **Version 1.x** (Flarum 1.8) — **discontinued and no longer published.**
 
-> **Latest highlights (2.10.1):** a security release — magnet names are escaped everywhere
+> **Latest highlights (2.10.2):** notification emails no longer carry magnet links — the
+> plain-text part used to quote the post's source, link included, to every follower, even
+> one without the *View magnet links* permission (e.g. a suspended member).
+>
+> **2.10.1:** a security release — magnet names are escaped everywhere
 > they're shown (a crafted `dn=` could add HTML attributes to the card); a `[magnet]` whose
 > link holds markup (an unencoded `http://` tracker, `*…*` in the name) stays one token-only
 > card instead of landing in the post as plain text; a server-wide limit on simultaneous
@@ -217,11 +221,12 @@ it (quotes included) in the card, its title attribute, the rename dialog and the
 tooltip. Everything between `[magnet]` and `[/magnet]` is literal link text: autolinks and
 Markdown inside it are ignored.
 
-**Known limitation — plain-text notification emails:** Flarum's plain-text emails for new
-replies and mentions (`flarum/subscriptions`, `flarum/mentions`) quote the post's *source*,
-which includes the `[magnet]` link; the HTML part only carries the token. Recipients are
-users who can see the discussion, so this only matters if you restrict *View magnet links*
-to fewer groups than can read the forum.
+**Emails never carry the link:** Flarum's notification emails quote the post — the
+plain-text part its *source*, with the whole `[magnet]` link — and their recipients
+(followers of a discussion, mentioned users) are chosen by the notification, not by the
+*View magnet links* permission: a suspended member still gets reply emails, for one. Every
+outgoing email therefore has its magnet links replaced by a short note pointing to the post
+(both parts; in the HTML part the card, which can't load in a mail client anyway).
 
 **Tracker scraping safety:** a magnet's tracker URLs are attacker-controlled,
 so before contacting any tracker the server resolves its host and refuses
@@ -422,9 +427,9 @@ node --test js/tests/*.test.mjs
 ```
 
 The integration tests run on SQLite by default; to run them on MySQL / MariaDB, set
-`DB_DRIVER`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` for
-`composer test:setup` — **never** point them at a real forum's database: every table is
-dropped first.
+`DB_DRIVER` (`mysql`, or `mariadb` for a MariaDB server), `DB_HOST`, `DB_PORT`, `DB_DATABASE`,
+`DB_USERNAME` and `DB_PASSWORD` for `composer test:setup` — **never** point them at a real
+forum's database: every table is dropped first.
 
 ## 🔗 Links & credits
 

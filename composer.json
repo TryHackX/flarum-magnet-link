@@ -40,6 +40,7 @@
         }
     },
     "require-dev": {
+        "flarum/subscriptions": "^2.0",
         "flarum/testing": "^2.0"
     },
     "autoload-dev": {

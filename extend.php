@@ -223,7 +223,10 @@ return [
         // Tworzenie wierszy magnet_links przy zapisie posta, aby render i tooltip
         // pozostały tylko-do-odczytu (bez INSERT-u w GET / w pętli renderu).
         ->listen(\Flarum\Post\Event\Posted::class, \TryHackX\MagnetLink\Listener\EnsureMagnetRecords::class)
-        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\EnsureMagnetRecords::class),
+        ->listen(\Flarum\Post\Event\Revised::class, \TryHackX\MagnetLink\Listener\EnsureMagnetRecords::class)
+        // E-maile powiadomień cytują post (tekst: źródło z całym linkiem), a odbiorców
+        // wybiera powiadomienie, nie uprawnienie — magnet zastępujemy notką.
+        ->listen(\Illuminate\Mail\Events\MessageSending::class, \TryHackX\MagnetLink\Listener\HideMagnetsInEmails::class),
 
     // Discussion-list ordering for the magnet-click sorts. Flarum lists
     // discussions through the database Search, which orders by column name;

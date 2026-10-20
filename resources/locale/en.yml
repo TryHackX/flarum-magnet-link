@@ -203,3 +203,7 @@ tryhackx-magnet-link:
         refresh_limit:
             cooldown: "This magnet was just refreshed — you can refresh it again in {seconds}s. Everyone already sees the latest result."
             quota: "Refresh limit reached. Please try again in {seconds}s."
+
+    # Server side: stands in for a magnet link in notification emails
+    email:
+        magnet_hidden: "Magnet link — open the post on the forum to get it"
