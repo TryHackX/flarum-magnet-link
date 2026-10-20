@@ -43,8 +43,20 @@ class MagnetConfigurator
             '<span class="MagnetLink-placeholder">Loading...</span>' .
         '</span>';
 
+        // Treść to dosłowny link magnet, nie tekst do formatowania: znaczniki w środku
+        // (autolink nieenkodowanego `tr=http://…`, `*…*` z Markdownu w nazwie) są
+        // ignorowane i zostają tekstem magnetu.
+        $tag->rules->ignoreTags();
+
         // 3. Dodaj BBCode - prosty format [magnet]content[/magnet]
-        // Zawartość BBCode staje się zawartością tagu XML
-        $configurator->BBCodes->add('MAGNET');
+        // Zawartość BBCode staje się zawartością tagu XML.
+        //
+        // forceLookahead paruje [magnet] z [/magnet] od razu. Szablon nie wypisuje
+        // treści, więc s9e daje tagowi regułę autoClose: niesparowany tag, po którym
+        // NIE następuje od razu [/magnet] (tylko np. autolink), był zamieniany na
+        // samozamykający — karta „Invalid token", a cały magnet lądował w HTML posta
+        // jako zwykły tekst (z pominięciem ochrony tokenem). Niezamknięty [magnet]
+        // zostaje zwykłym tekstem, więc nie połyka reszty posta.
+        $configurator->BBCodes->add('MAGNET')->forceLookahead = true;
     }
 }

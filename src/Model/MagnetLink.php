@@ -93,23 +93,7 @@ class MagnetLink extends AbstractModel
             $infoHash = self::base32ToHex($infoHash);
         }
 
-        // Wyodrębnij nazwę
-        $name = null;
-        if (preg_match('/[&?]dn=([^&]+)/i', $magnetUri, $nameMatch)) {
-            $encoded = $nameMatch[1];
-            // Najpierw zamień + na spację (URL encoding style)
-            $name = str_replace('+', ' ', $encoded);
-            // Potem zdekoduj pozostałe znaki (%XX)
-            $name = rawurldecode($name);
-            // Zamień tylko podkreślenia i kropki na spacje (NIE myślniki!)
-            $name = preg_replace('/[_.]+/', ' ', $name);
-            // Usuń wielokrotne spacje
-            $name = trim(preg_replace('/\s+/', ' ', $name));
-            // Ogranicz długość
-            if (strlen($name) > 500) {
-                $name = substr($name, 0, 497) . '...';
-            }
-        }
+        $name = self::nameFromUri($magnetUri);
 
         $token = self::generateToken($magnetUri);
 
@@ -127,6 +111,36 @@ class MagnetLink extends AbstractModel
                 'click_count' => 0,
             ]
         );
+    }
+
+    /**
+     * Czytelna nazwa z parametru `dn=` magnetu, albo null (brak / pusta po oczyszczeniu).
+     *
+     * `+` i `%XX` dekodowane, podkreślenia i kropki → spacje (myślniki zostają),
+     * wielokrotne spacje zwinięte. Treść jest w pełni pod kontrolą autora posta, więc:
+     * niepoprawne UTF-8 jest naprawiane (mb_scrub), znaki sterujące usuwane, a długość
+     * przycinana po ZNAKACH do kolumny name (500) — dawny substr() po bajtach potrafił
+     * przeciąć znak wielobajtowy, a takiej wartości ścisła baza nie przyjmie.
+     */
+    public static function nameFromUri(string $magnetUri): ?string
+    {
+        if (! preg_match('/[&?]dn=([^&]+)/i', $magnetUri, $nameMatch)) {
+            return null;
+        }
+
+        // Najpierw zamień + na spację (URL encoding style), potem zdekoduj %XX.
+        $name = mb_scrub(rawurldecode(str_replace('+', ' ', $nameMatch[1])), 'UTF-8');
+        $name = preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $name) ?? '';
+        // Zamień tylko podkreślenia i kropki na spacje (NIE myślniki!)
+        $name = preg_replace('/[_.]+/', ' ', $name) ?? '';
+        // Usuń wielokrotne spacje
+        $name = trim(preg_replace('/\s+/', ' ', $name) ?? '');
+        // Ogranicz długość (kolumna varchar(500) liczy znaki)
+        if (mb_strlen($name) > 500) {
+            $name = mb_substr($name, 0, 497) . '...';
+        }
+
+        return $name === '' ? null : $name;
     }
 
     /**

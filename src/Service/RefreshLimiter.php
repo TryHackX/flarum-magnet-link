@@ -4,6 +4,7 @@ namespace TryHackX\MagnetLink\Service;
 
 use Flarum\Settings\SettingsRepositoryInterface;
 use Illuminate\Contracts\Cache\Repository;
+use TryHackX\MagnetLink\Support\IntSetting;
 
 /**
  * Rate-limits the manual "refresh" of a magnet's tracker stats.
@@ -47,9 +48,9 @@ class RefreshLimiter
     {
         $now = time();
 
-        $cooldown = max(0, (int) $this->settings->get('tryhackx-magnet-link.refresh_cooldown', 30));
-        $limit = max(0, (int) $this->settings->get('tryhackx-magnet-link.refresh_limit_count', 10));
-        $window = max(1, (int) $this->settings->get('tryhackx-magnet-link.refresh_limit_window', 600));
+        $cooldown = max(0, IntSetting::get($this->settings, 'tryhackx-magnet-link.refresh_cooldown', 30));
+        $limit = max(0, IntSetting::get($this->settings, 'tryhackx-magnet-link.refresh_limit_count', 10));
+        $window = max(1, IntSetting::get($this->settings, 'tryhackx-magnet-link.refresh_limit_window', 600));
 
         // 1) Per-magnet cooldown (global).
         if ($cooldown > 0) {

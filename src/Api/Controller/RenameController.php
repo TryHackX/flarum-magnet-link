@@ -102,7 +102,9 @@ class RenameController implements RequestHandlerInterface
             // Only a string counts as a name: an array/object would make trim() throw a
             // TypeError (not caught below, so a 500 instead of a validation error).
             $customName = is_string($body['custom_name'] ?? null) ? trim($body['custom_name']) : '';
-            if (empty($customName) || strlen($customName) > 500) {
+            // Characters, not bytes (the column holds 500 characters; strlen() turned
+            // away Polish names over ~250 letters), and "0" is a name too.
+            if ($customName === '' || mb_strlen($customName) > 500) {
                 return new JsonResponse([
                     'success' => false,
                     'error' => 'invalid_name',

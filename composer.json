@@ -39,6 +39,29 @@
             "Scrapeer\\": "src/Scraper/"
         }
     },
+    "require-dev": {
+        "flarum/testing": "^2.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "TryHackX\\MagnetLink\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": [
+            "@test:unit",
+            "@test:integration"
+        ],
+        "test:unit": "phpunit -c tests/phpunit.unit.xml",
+        "test:integration": "phpunit -c tests/phpunit.integration.xml",
+        "test:setup": "@php tests/integration/setup.php"
+    },
+    "scripts-descriptions": {
+        "test": "Runs all PHP tests.",
+        "test:unit": "Runs the PHP unit tests (JavaScript: node --test js/tests/*.test.mjs).",
+        "test:integration": "Runs the PHP integration tests (needs test:setup once).",
+        "test:setup": "Sets up a database for the integration tests (SQLite by default)."
+    },
     "extra": {
         "flarum-extension": {
             "title": "Magnet Link BBCode",

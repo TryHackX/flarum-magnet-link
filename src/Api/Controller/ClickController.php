@@ -14,6 +14,7 @@ use TryHackX\MagnetLink\Model\MagnetClick;
 use TryHackX\MagnetLink\Model\MagnetBan;
 use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
 use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
+use TryHackX\MagnetLink\Support\IntSetting;
 use Psr\Log\LoggerInterface;
 use Carbon\Carbon;
 
@@ -87,7 +88,7 @@ class ClickController implements RequestHandlerInterface
                 $banEnabled = (bool) $this->settings->get('tryhackx-magnet-link.ban_enabled', true);
                 
                 if ($banEnabled) {
-                    $banTime = (int) $this->settings->get('tryhackx-magnet-link.ban_time', 20);
+                    $banTime = IntSetting::get($this->settings, 'tryhackx-magnet-link.ban_time', 20);
                     $banStatus = MagnetBan::isBanned($clientIp, $banTime);
                     
                     if ($banStatus['banned']) {
@@ -103,18 +104,19 @@ class ClickController implements RequestHandlerInterface
                 }
 
                 // Sprawdź czy IP kliknęło ostatnio ten sam magnet
-                $selfInterval = (int) $this->settings->get('tryhackx-magnet-link.self_interval', 1);
+                $selfInterval = IntSetting::get($this->settings, 'tryhackx-magnet-link.self_interval', 1);
                 $hasRecentClick = MagnetClick::hasRecentClick($magnetLink->id, $clientIp, $selfInterval);
                 
                 if (!$hasRecentClick) {
                     // Sprawdź spam i ewentualnie zbanuj
                     if ($banEnabled) {
-                        $banInterval = (int) $this->settings->get('tryhackx-magnet-link.ban_interval', 10);
-                        $banIntervalCount = (int) $this->settings->get('tryhackx-magnet-link.ban_interval_count', 100);
-                        
+                        $banInterval = IntSetting::get($this->settings, 'tryhackx-magnet-link.ban_interval', 10);
+                        $banIntervalCount = IntSetting::get($this->settings, 'tryhackx-magnet-link.ban_interval_count', 100);
+
                         $recentClicks = MagnetClick::countRecentClicks($clientIp, $banInterval);
-                        
-                        if ($recentClicks >= $banIntervalCount) {
+
+                        // Próg < 1 nie ma sensu (0 banowałoby przy KAŻDYM kliknięciu).
+                        if ($banIntervalCount > 0 && $recentClicks >= $banIntervalCount) {
                             MagnetBan::banIp($clientIp);
                             
                             return new JsonResponse([

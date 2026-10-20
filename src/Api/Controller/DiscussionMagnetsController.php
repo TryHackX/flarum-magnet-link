@@ -15,6 +15,7 @@ use TryHackX\MagnetLink\Model\MagnetCustomName;
 use TryHackX\MagnetLink\Service\TrackerScraper;
 use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
 use TryHackX\MagnetLink\Concerns\ResolvesRouteParam;
+use TryHackX\MagnetLink\Support\IntSetting;
 use Psr\Log\LoggerInterface;
 
 class DiscussionMagnetsController implements RequestHandlerInterface
@@ -121,7 +122,7 @@ class DiscussionMagnetsController implements RequestHandlerInterface
             $magnets = $this->collectMagnetData($posts, $customNames);
 
             // Ogranicz liczbę magnetów w tooltipie PRZED scrapowaniem.
-            $maxMagnets = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_magnets', 3);
+            $maxMagnets = IntSetting::get($this->settings, 'tryhackx-magnet-link.tooltip_max_magnets', 3);
             if ($maxMagnets > 0 && count($magnets) > $maxMagnets) {
                 $magnets = array_slice($magnets, 0, $maxMagnets);
             }
@@ -218,7 +219,7 @@ class DiscussionMagnetsController implements RequestHandlerInterface
         // TrackerScraper::HARD_TIME_BUDGET. Floor = 2 (nie 1): przy budżecie 1 s
         // wewnętrzny guard `remaining < 1.0` w computeScrape przerywa pętlę zanim
         // skontaktuje CHOĆBY JEDEN tracker (0,14 s, zero prób) — 1 s to martwa strefa.
-        $budget = (int) $this->settings->get('tryhackx-magnet-link.tooltip_scrape_budget', self::DEFAULT_TOOLTIP_SCRAPE_BUDGET);
+        $budget = IntSetting::get($this->settings, 'tryhackx-magnet-link.tooltip_scrape_budget', self::DEFAULT_TOOLTIP_SCRAPE_BUDGET);
         $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
         $deadline = microtime(true) + $budget;
 
@@ -227,8 +228,8 @@ class DiscussionMagnetsController implements RequestHandlerInterface
         //  - tooltip_tracker_timeout → per-tracker timeout (niższy = więcej trackerów
         //    zdąży się odpytać w budżecie, większa szansa na żywy tracker).
         // Inny limit/timeout niż w temacie = osobny klucz cache (bez zatruwania tematu).
-        $ttMax = (int) $this->settings->get('tryhackx-magnet-link.tooltip_max_trackers', 0);
-        $ttTimeout = (int) $this->settings->get('tryhackx-magnet-link.tooltip_tracker_timeout', 0);
+        $ttMax = IntSetting::get($this->settings, 'tryhackx-magnet-link.tooltip_max_trackers', 0);
+        $ttTimeout = IntSetting::get($this->settings, 'tryhackx-magnet-link.tooltip_tracker_timeout', 0);
         $maxOverride = $ttMax > 0 ? $ttMax : null;
         $timeoutOverride = $ttTimeout > 0 ? $ttTimeout : null;
 

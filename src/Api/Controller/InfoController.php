@@ -16,6 +16,7 @@ use TryHackX\MagnetLink\Service\RefreshLimiter;
 use TryHackX\MagnetLink\Concerns\ResolvesClientIp;
 use TryHackX\MagnetLink\Concerns\ChecksMagnetAccess;
 use TryHackX\MagnetLink\Concerns\ResolvesRouteParam;
+use TryHackX\MagnetLink\Support\IntSetting;
 
 class InfoController implements RequestHandlerInterface
 {
@@ -129,7 +130,7 @@ class InfoController implements RequestHandlerInterface
         // tooltipa, bo to główny, dokładny widok danych magnetu.
         // Floor = 2 (nie 1): budżet 1 s nie zdąży skontaktować ani jednego
         // trackera przez guard `remaining < 1.0` w computeScrape (martwa strefa).
-        $budget = (int) $this->settings->get('tryhackx-magnet-link.topic_scrape_budget', 15);
+        $budget = IntSetting::get($this->settings, 'tryhackx-magnet-link.topic_scrape_budget', 15);
         $budget = max(2, min($budget, (int) TrackerScraper::HARD_TIME_BUDGET));
 
         $response['scrape'] = $this->scraper->scrapeForMagnet($magnetLink, microtime(true) + $budget, $doBypass);

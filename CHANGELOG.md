@@ -10,6 +10,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-10-20
+
+> **No migrations** (the built JS ships in `js/dist`) → `composer update` + `php flarum cache:clear`.
+> Then, once: `php flarum magnet:reparse` (or *Re-parse old magnet links*) — it repairs posts
+> hit by the BBCode fix below and does nothing when there are none.
+
+### Security
+- **Stored XSS through the magnet name.** The display name comes from the magnet's `dn=`
+  parameter (or the author's custom name) — text the poster controls. The card, its `title`
+  attribute, the rename dialog and the list tooltip built HTML with an escape helper that left
+  quotes alone, so a name like `x" onmouseover="…` added attributes to the card for every
+  viewer. One shared `escapeHtml()` now escapes `& < > " '` in every template.
+- **A `[magnet]` holding markup no longer leaks its link.** An unencoded `http://` tracker
+  (autolinked) or `*…*` in the name (Markdown emphasis) inside the BBCode made the formatter
+  close the tag at once: the card showed *Invalid token* and the whole magnet URI stayed in
+  the post's HTML as plain text — past the token protection and the guest / permission gates.
+  The BBCode now pairs with its end tag up front (`forceLookahead`) and ignores markup inside
+  it. The re-parse tool also repairs posts saved before this release.
+- **Server-wide limit on simultaneous scrapes** (*Max Concurrent Scrapes*, default 4). An
+  uncached scrape holds a PHP worker for up to its time budget, and a tooltip hover the
+  visitor leaves early keeps scraping server-side — fast list browsing or many uncached
+  topics at once could occupy every worker. Each uncached scrape now takes one of N slots
+  (cache locks shared by all workers); with every slot taken the API answers `busy` at once.
+  That answer is never cached: the in-post card retries once a few seconds later, the tooltip
+  asks again on the next hover. A magnet with no tracker to contact needs no slot.
+
+### Fixed
+- **Cleared number settings fall back to their defaults.** Flarum saves a number field the
+  admin emptied as `''`, which was read as 0: an empty ban *Threshold* banned every IP on its
+  first click, an empty *Cache Lifetime* turned the cache off, an empty *Topic Scrape Time
+  Budget* cut it to 2 s. A ban threshold below 1 no longer bans at all.
+- **The *View magnet links* permission showed its raw translation key** on the admin
+  Permissions page — the key sat outside `admin.*`, the only keys the admin frontend receives.
+- **Copy works without the Clipboard API** (plain-http pages, a browser refusing it): it falls
+  back to a hidden textarea + `execCommand('copy')`, and the check mark appears only when the
+  copy really happened.
+- **Names are cut by characters, not bytes.** The `dn=` name was trimmed to 500 bytes, which
+  could split a character into invalid UTF-8; invalid UTF-8 is now repaired, control
+  characters removed and the name trimmed to 500 characters. Custom names likewise allow 500
+  characters (they allowed 500 bytes, turning away Polish names over ~250 letters), and `0`
+  counts as a name.
+- The re-parse tool no longer re-saves (and counts) posts whose XML comes out unchanged.
+
+### Added
+- Unit, integration (SQLite and MySQL/MariaDB) and JavaScript tests — `composer test`,
+  `node --test js/tests/*.test.mjs`.
+
 ## [2.10.0] - 2026-10-20
 
 > **PHP only — no migrations, no frontend rebuild** → `composer update` + `php flarum cache:clear`.

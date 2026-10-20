@@ -1,10 +1,15 @@
 import app from 'flarum/forum/app';
+import escapeHtml from './utils/escapeHtml';
+import copyText from './utils/copyText';
 
 /**
  * Manager odpowiedzialny za obsługę magnet linków
  * WAŻNE: Magnet link NIE jest przechowywany w DOM - tylko token SHA256
  */
 export default class MagnetLinkManager {
+    /** Po ilu ms ponowić wczytanie karty, gdy serwer odpowiedział „zajęte" (+ losowe 0–2 s). */
+    static BUSY_RETRY_MS = 4000;
+
     constructor() {
         // Cache danych per token:postId
         this.dataCache = new Map();
@@ -25,6 +30,14 @@ export default class MagnetLinkManager {
     cacheTtlMs() {
         const ttl = parseInt(app.forum.attribute('magnetCacheTtl'), 10);
         return (Number.isFinite(ttl) && ttl > 0 ? ttl : 300) * 1000;
+    }
+
+    /**
+     * Czy odpowiedź API to „zajęte" — serwer odmówił scrapowania, bo wszystkie jego
+     * sloty (scrape_max_concurrent) były w użyciu. Taki wynik nie trafia do cache.
+     */
+    static isBusy(data) {
+        return !!(data && data.scrape && data.scrape.error_type === 'busy');
     }
 
     /**
@@ -76,6 +89,19 @@ export default class MagnetLinkManager {
 
             // Renderuj kompletny magnet link
             this.renderMagnetLink(element, token, data, postId, postUserId);
+
+            // Serwer odpowiedział „zajęte" (wszystkie sloty scrapowania w użyciu) —
+            // jedna cicha ponowna próba po chwili, o ile karta wciąż jest na stronie.
+            if (MagnetLinkManager.isBusy(data)) {
+                setTimeout(() => {
+                    if (!element.isConnected) return;
+                    this.fetchMagnetData(token, postId)
+                        .then((fresh) => {
+                            if (element.isConnected) this.renderMagnetLink(element, token, fresh, postId, postUserId);
+                        })
+                        .catch(() => {});
+                }, MagnetLinkManager.BUSY_RETRY_MS + Math.floor(Math.random() * 2000));
+            }
         } catch (error) {
             // Sprawdź czy to błąd uprawnień
             if (error.status === 403) {
@@ -123,8 +149,9 @@ export default class MagnetLinkManager {
             errorHandler: this.silentErrorHandler.bind(this)
         });
 
-        // Zapisz do cache (jeśli włączony)
-        if (this.cacheEnabled()) {
+        // Zapisz do cache (jeśli włączony) — ale nie odpowiedź „zajęte" (wszystkie
+        // serwerowe sloty scrapowania w użyciu): to stan chwilowy, nie wynik.
+        if (this.cacheEnabled() && !MagnetLinkManager.isBusy(response)) {
             this.dataCache.set(cacheKey, {
                 data: response,
                 timestamp: Date.now()
@@ -396,8 +423,12 @@ export default class MagnetLinkManager {
                     this.updateClickCountDisplay(token, response.click_count);
                 }
 
-                // Skopiuj do schowka
-                await navigator.clipboard.writeText(response.magnet_uri);
+                // Skopiuj do schowka (z zapasową ścieżką dla stron http / odmowy
+                // przeglądarki — samo navigator.clipboard rzucało tam TypeError).
+                if (!(await copyText(response.magnet_uri))) {
+                    console.error('Copy error: the browser refused the clipboard');
+                    return;
+                }
 
                 // Pokaż potwierdzenie - zmień ikonę na check
                 if (copyBtn) {
@@ -725,12 +756,10 @@ export default class MagnetLinkManager {
     }
 
     /**
-     * Escape HTML
+     * Escape HTML — also for attribute values (quotes included), see utils/escapeHtml.
      */
     escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+        return escapeHtml(text);
     }
 
 }

@@ -7,6 +7,7 @@ use Flarum\Console\AbstractCommand;
 use Flarum\Settings\SettingsRepositoryInterface;
 use Symfony\Component\Console\Input\InputOption;
 use TryHackX\MagnetLink\Model\MagnetBan;
+use TryHackX\MagnetLink\Support\IntSetting;
 
 /**
  * `php flarum magnet:prune-bans [--minutes=N] [--dry-run]`
@@ -46,7 +47,7 @@ class PruneMagnetBansCommand extends AbstractCommand
         $minutesOpt = $this->input->getOption('minutes');
         $minutes = ($minutesOpt !== null && $minutesOpt !== '')
             ? (int) $minutesOpt
-            : (int) $this->settings->get('tryhackx-magnet-link.ban_time', 20);
+            : IntSetting::get($this->settings, 'tryhackx-magnet-link.ban_time', 20);
 
         if ($minutes < 1) {
             $this->error('Provide a positive --minutes value (or set a positive ban_time).');

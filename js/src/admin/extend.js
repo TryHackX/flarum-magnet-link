@@ -93,6 +93,15 @@ export default [
             default: 15,
         }))
         .setting(() => ({
+            setting: 'tryhackx-magnet-link.scrape_max_concurrent',
+            type: 'number',
+            label: app.translator.trans('tryhackx-magnet-link.admin.settings.scrape_max_concurrent_label', {}, true),
+            help: app.translator.trans('tryhackx-magnet-link.admin.settings.scrape_max_concurrent_help', {}, true),
+            min: 1,
+            max: 32,
+            default: 4,
+        }))
+        .setting(() => ({
             setting: 'tryhackx-magnet-link.scraper_max_redirects',
             type: 'number',
             label: app.translator.trans('tryhackx-magnet-link.admin.settings.scraper_max_redirects_label', {}, true),
@@ -283,7 +292,7 @@ export default [
         .permission(
             () => ({
                 icon: 'fas fa-magnet',
-                label: app.translator.trans('tryhackx-magnet-link.permissions.viewMagnetLinks', {}, true),
+                label: app.translator.trans('tryhackx-magnet-link.admin.permissions.view_magnet_links', {}, true),
                 permission: 'tryhackx-magnet-link.viewMagnetLinks',
             }),
             'view',

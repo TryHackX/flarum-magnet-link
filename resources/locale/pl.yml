@@ -41,6 +41,9 @@ tryhackx-magnet-link:
             topic_scrape_budget_label: "Budżet czasu scrapowania w temacie (sekundy)"
             topic_scrape_budget_help: "Maksymalny łączny czas scrapowania trackerów dla magnetu w otwartym temacie (karta w poście). Domyślnie 15. To dokładny, pełny widok, więc dostaje większy budżet niż dymek listy. Twardo ograniczony do 30 sekund, by jedno żądanie nie wiązało workera na długo."
 
+            scrape_max_concurrent_label: "Maks. równoczesnych scrapowań (cały serwer)"
+            scrape_max_concurrent_help: "Ile scrapowań trackerów spoza cache może biec jednocześnie na całym serwerze (domyślnie 4). Każde trzyma workera PHP do końca swojego budżetu czasu — a dymek, z którego odwiedzający szybko zjechał, nadal scrapuje na serwerze — więc bez limitu szybkie przeglądanie listy albo wiele tematów bez cache naraz mogłoby zająć całą pulę workerów. Ponad limit żądanie od razu dostaje odpowiedź „zajęte” — nigdy z cache: karta w poście sama ponawia, a dymek listy pyta ponownie przy następnym najechaniu. Zwiększ tylko, jeśli serwer ma wolne workery PHP."
+
             scraper_max_redirects_label: "Maks. przekierowań trackera"
             scraper_max_redirects_help: "Ile przekierowań HTTP(S) podążyć przy scrapowaniu trackera. Domyślnie 0 (nie podążaj). Zwiększ do 1-2, jeśli tracker jest za Cloudflare lub CDN przekierowującym http→https. Każdy hop jest nadal walidowany guardem SSRF, więc tracker nie przekieruje żądania na adres prywatny/wewnętrzny."
 
@@ -149,6 +152,11 @@ tryhackx-magnet-link:
             copy: "Kopiuj adres"
             thanks: "Dziękuję za wsparcie!"
 
+        # Nazwa uprawnienia na stronie Uprawnienia w panelu admina (do panelu trafiają
+        # tylko klucze admin.* / lib.*)
+        permissions:
+            view_magnet_links: "Przeglądanie linków magnet"
+
     forum:
         loading: "Ładowanie informacji o magnecie..."
         seeds: "Seedy:"
@@ -188,13 +196,10 @@ tryhackx-magnet-link:
             no_trackers: "Link magnet nie zawiera trackerów"
             no_http_trackers: "Brak trackerów HTTP(S)"
             no_response: "Żaden tracker nie odpowiedział"
+            busy: "Statystyki trackerów są teraz zajęte — spróbuj ponownie za chwilę"
             scraper_error: "Nie udało się połączyć z trackerami"
             load_failed: "Nie udało się załadować informacji o magnecie"
 
         refresh_limit:
             cooldown: "Ten magnet został przed chwilą odświeżony — możesz odświeżyć ponownie za {seconds} s. Wszyscy już widzą najnowszy wynik."
             quota: "Osiągnięto limit odświeżeń. Spróbuj ponownie za {seconds} s."
-
-    # Nazwa uprawnienia (pokazywana w panelu uprawnień admina)
-    permissions:
-        viewMagnetLinks: "Przeglądanie linków magnet"

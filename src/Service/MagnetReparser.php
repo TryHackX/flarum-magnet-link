@@ -13,12 +13,17 @@ use Psr\Log\LoggerInterface;
  * XML instead of <MAGNET> tags, so neither the in-post button nor the
  * discussion tooltip (which scans the stored XML for <MAGNET>) work.
  *
+ * The same goes for posts that versions before 2.10.1 parsed into a <MAGNET> tag
+ * closed at once ("<MAGNET>[magnet]</MAGNET>magnet:?…[/magnet]"): a magnet holding
+ * markup — an unencoded http:// tracker, *…* in its name — left the whole link in
+ * the post's HTML as plain text.
+ *
  * Re-parsing rebuilds the stored XML through the now-registered formatter:
  *   - the content accessor unparses the stored XML back to its source text;
  *   - the content mutator parses it again, producing <MAGNET> tags.
  *
  * It is safe and idempotent:
- *   - already-processed posts (containing <MAGNET>) are excluded by the query;
+ *   - already-processed posts (with only working <MAGNET> tags) are excluded by the query;
  *   - re-parsing a post that is already correct would yield identical XML;
  *   - failures on a single post are swallowed so the batch keeps going.
  */
@@ -34,11 +39,24 @@ class MagnetReparser
      */
     public function countPending(): int
     {
+        return $this->pending()->count();
+    }
+
+    private function pending()
+    {
         return CommentPost::query()
             ->where('type', 'comment')
-            ->where('content', 'like', '%[magnet]%')
-            ->where('content', 'not like', '%<MAGNET%')
-            ->count();
+            ->where(function ($query) {
+                $query
+                    // Raw, unprocessed BBCode is present, but the formatter never
+                    // turned it into a <MAGNET> tag…
+                    ->where(function ($query) {
+                        $query->where('content', 'like', '%[magnet]%')
+                            ->where('content', 'not like', '%<MAGNET%');
+                    })
+                    // …or turned it into one closed at once (before 2.10.1).
+                    ->orWhere('content', 'like', '%<MAGNET>[magnet]</MAGNET>%');
+            });
     }
 
     /**
@@ -49,12 +67,7 @@ class MagnetReparser
     {
         $count = 0;
 
-        CommentPost::query()
-            ->where('type', 'comment')
-            // Raw, unprocessed BBCode is present…
-            ->where('content', 'like', '%[magnet]%')
-            // …but the formatter never turned it into a <MAGNET> tag.
-            ->where('content', 'not like', '%<MAGNET%')
+        $this->pending()
             ->chunkById(50, function ($posts) use (&$count, $onPost) {
                 foreach ($posts as $post) {
                     try {
@@ -68,6 +81,12 @@ class MagnetReparser
                         // Mutator: source text -> XML (now with <MAGNET> tags),
                         // using the post author as the parsing actor.
                         $post->setContentAttribute($source, $post->user);
+
+                        // Nothing to fix (e.g. an unclosed [magnet], which stays text).
+                        if (! $post->isDirty('content')) {
+                            continue;
+                        }
+
                         $post->save();
 
                         // Po re-parsie pierwszy post może teraz mieć <MAGNET> —

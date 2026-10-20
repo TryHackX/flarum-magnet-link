@@ -1,5 +1,6 @@
 import app from 'flarum/forum/app';
 import HoverFetchManager from './HoverFetchManager';
+import escapeHtml from './utils/escapeHtml';
 
 /**
  * Tooltip wyświetlający statystyki magnet linków na liście dyskusji
@@ -191,7 +192,11 @@ export default class DiscussionTooltip {
 
         // Zapisz do cache (również odpowiedzi błędne — cache ma timeout). Aborty tu
         // nie docierają (rzucone wyżej), więc nie cache'ujemy pustki po przerwaniu.
-        if (this.cacheEnabled()) {
+        // Wyjątek: magnet „zajęty" (wszystkie serwerowe sloty scrapowania w użyciu)
+        // to stan chwilowy — następne najechanie ma zapytać ponownie.
+        const busy = response && Array.isArray(response.magnets)
+            && response.magnets.some((magnet) => magnet && magnet.scrape && magnet.scrape.error_type === 'busy');
+        if (this.cacheEnabled() && !busy) {
             this.tooltipCache.set(discussionId, {
                 data: response,
                 timestamp: Date.now()
@@ -244,12 +249,6 @@ export default class DiscussionTooltip {
      * Renderuj zawartość tooltipa
      */
     renderContent(magnets) {
-        const escapeHtml = (text) => {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        };
-
         const truncate = (name, maxLen) => {
             if (!name) return '';
             if (name.length <= maxLen) return name;
@@ -342,12 +341,6 @@ export default class DiscussionTooltip {
      * brak permisji) — analogicznie do renderowania w poście (MagnetLinkManager).
      */
     renderPermissionMessage(errorType) {
-        const escapeHtml = (text) => {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        };
-
         let message;
         if (errorType === 'guest_not_allowed') {
             message =

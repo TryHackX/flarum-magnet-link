@@ -12,9 +12,15 @@ before the extension was enabled.
 - **Version 2.x** — requires **Flarum 2.0.2+** (PHP 8.3+). **Actively developed.**
 - **Version 1.x** (Flarum 1.8) — **discontinued and no longer published.**
 
-> **Latest highlights (2.10.0):** the scraper's SSRF guard also refuses carrier-grade NAT,
-> benchmarking and multicast ranges and IPv6 forms that embed or tunnel IPv4 (NAT64, 6to4,
-> Teredo); PHP 8.5 ready.
+> **Latest highlights (2.10.1):** a security release — magnet names are escaped everywhere
+> they're shown (a crafted `dn=` could add HTML attributes to the card); a `[magnet]` whose
+> link holds markup (an unencoded `http://` tracker, `*…*` in the name) stays one token-only
+> card instead of landing in the post as plain text; a server-wide limit on simultaneous
+> tracker scrapes keeps hover-heavy browsing from tying up every PHP worker; copying works
+> without the Clipboard API; cleared number settings fall back to their defaults.
+>
+> **2.10.0:** the scraper's SSRF guard also refuses carrier-grade NAT, benchmarking and
+> multicast ranges and IPv6 forms that embed or tunnel IPv4 (NAT64, 6to4, Teredo); PHP 8.5 ready.
 
 > **Highlights of 2.9.0:**
 > - **Hardened scraper engine (now the default)** — a cURL engine that pins the
@@ -109,6 +115,10 @@ before the extension was enabled.
   stats (bypasses the cache for a genuine re-scrape). Bounded by a global
   per-magnet cooldown — one refresh updates the shared result everyone sees —
   and a per-IP sliding-window quota that covers guests too; both configurable.
+- **Server-wide scrape limit** — at most *Max Concurrent Scrapes* (default 4) uncached
+  scrapes run at once across all PHP workers (cache locks). Over the limit the API answers
+  "busy" straight away — never cached: the in-post card retries by itself a few seconds
+  later, the list tooltip asks again on the next hover.
 
 ### Discussion-list tooltip
 
@@ -142,6 +152,11 @@ this extension was enabled, the parsed XML stored in `posts.content`
 doesn't contain `<MAGNET>` tags — so neither the in-post button nor the
 tooltip works.
 
+The same tool repairs posts that versions **before 2.10.1** parsed into a tag closed at
+once: when the link held markup — an unencoded `http://` tracker (autolinked) or `*…*` in
+the name (Markdown) — the card showed *Invalid token* and the whole magnet stayed in the
+post as plain text. Run it once after upgrading if your forum may have such posts.
+
 This release ships two ways to fix it:
 
 - **CLI:** `php flarum magnet:reparse` — batched, idempotent, no HTTP
@@ -153,20 +168,21 @@ This release ships two ways to fix it:
 Both use the same `MagnetReparser` service, which:
 
 - Targets only posts whose XML contains the literal `[magnet]` BBCode but
-  not yet a `<MAGNET>` tag.
+  not yet a `<MAGNET>` tag, or a `<MAGNET>` tag closed at once (see above).
 - Goes through them in chunks of 50 (`chunkById`).
 - Re-parses each post via the content accessor / mutator — which unparses
   the stored XML back to its source and re-parses it with the now-active
   formatter, producing `<MAGNET>` tags.
-- Is safe to run repeatedly: posts that already have `<MAGNET>` are
-  excluded by the query; re-parsing one that's already correct produces
-  identical XML.
+- Is safe to run repeatedly: posts with only working `<MAGNET>` tags are
+  excluded by the query, and a post whose XML comes out unchanged (e.g. an
+  unclosed `[magnet]`, which stays text) is neither saved nor counted.
 
 ### Custom torrent names
 
 - Post authors can rename their magnet links from the post UI.
 - The custom name is stored per magnet × post pair, so the same magnet
   can appear under different names in different topics.
+- Up to 500 characters (counted as characters, so non-Latin names get the full length).
 
 ### Analytics & protection
 
@@ -194,6 +210,18 @@ Both use the same `MagnetReparser` service, which:
 5. The API checks permissions (group, guest, email verification) and
    returns the magnet URI only to authorised users.
 6. The browser opens the magnet link.
+
+**Names are text, never markup:** a magnet's display name comes from its `dn=` parameter
+or the author's custom name — both fully controlled by the poster — so the frontend escapes
+it (quotes included) in the card, its title attribute, the rename dialog and the list
+tooltip. Everything between `[magnet]` and `[/magnet]` is literal link text: autolinks and
+Markdown inside it are ignored.
+
+**Known limitation — plain-text notification emails:** Flarum's plain-text emails for new
+replies and mentions (`flarum/subscriptions`, `flarum/mentions`) quote the post's *source*,
+which includes the `[magnet]` link; the HTML part only carries the token. Recipients are
+users who can see the discussion, so this only matters if you restrict *View magnet links*
+to fewer groups than can read the forum.
 
 **Tracker scraping safety:** a magnet's tracker URLs are attacker-controlled,
 so before contacting any tracker the server resolves its host and refuses
@@ -294,6 +322,7 @@ Go to **Admin → Extensions → Magnet Link**.
 | Tracker Timeout | 2 s | Per-tracker (clamped to the remaining time budget). |
 | Maximum Trackers | 0 | Max trackers contacted per magnet. 0 = built-in safety cap (12); a wall-clock budget also applies. |
 | **Topic Scrape Time Budget (seconds)** | **15** | Total tracker-scrape time for a magnet shown in the open topic (the in-post card). Clamped to 2–30 s (a hard 30 s ceiling bounds the worker no matter what). Raise it for magnets with many trackers. |
+| **Max Concurrent Scrapes (server-wide)** | **4** | How many uncached scrapes may run at once on the whole server (1–32). Each holds a PHP worker for up to its time budget, and a tooltip hover the visitor leaves early keeps scraping server-side; over the limit the request gets an immediate "busy" (never cached — the card retries by itself). Raise it only if the server has spare PHP workers. |
 | **Max Tracker Redirects** | **0** | HTTP(S) redirects to follow per tracker (0–5). 0 = don't follow. Raise to 1–2 for a tracker behind Cloudflare/CDN that redirects http→https; every hop is re-validated by the SSRF guard. |
 | **Priority Trackers** | *(empty)* | Optional, one tracker host per line. Listed hosts are queried first (in order) when a magnet contains them — better stats/latency in the default "first responder" mode. Reorder only; never adds trackers not in the magnet. |
 | **Tracker host allowlist (security)** | *(empty)* | Optional, one trusted tracker host per line. When non-empty, **only** these hosts are ever contacted — tracker URLs from post content that aren't listed are skipped entirely, closing the SSRF / DNS-rebinding surface for attacker-supplied trackers. Empty = scrape any public host (still behind the SSRF guard). |
@@ -317,6 +346,9 @@ Go to **Admin → Extensions → Magnet Link**.
 | Enable Spam Protection | On | Temporarily ban IPs that click too many magnets. |
 | Ban Duration / Interval / Threshold | 20 min / 10 min / 100 | Tuning for the ban system. |
 | Self-Click Interval | 1 day | How long before the same IP can re-bump a click. |
+
+A number field left **empty** counts as its default (Flarum saves a cleared field as an
+empty value); type `0` where the table gives 0 a meaning.
 
 ## 🛠 Usage
 
@@ -370,12 +402,29 @@ Or use the editor button to insert / wrap the selection automatically.
 - **Stats show "no usable trackers"** — the tracker host may resolve to a
   private / reserved IP and be blocked for safety. If that's intentional
   (e.g. a LAN tracker), enable *Allow Private/Internal Trackers*.
-- **In-post magnets show as raw `[magnet]…[/magnet]` text** — run the
+- **In-post magnets show as raw `[magnet]…[/magnet]` text**, or as an *Invalid token*
+  card followed by the link as plain text (posts saved before 2.10.1) — run the
   backfill (`php flarum magnet:reparse` or the admin button).
+- **Stats say "busy"** — every *Max Concurrent Scrapes* slot was in use; the card retries
+  by itself. If it happens often and the server has spare PHP workers, raise the limit.
 - **500 from the API** — check the Flarum logs, ensure migrations have
   been run.
 - **Stats look stale** — they're cached; use the per-link refresh button to
   force a re-scrape, or lower *Cache Lifetime* (set 0 to disable caching).
+
+## 🧪 Tests
+
+```bash
+composer install
+composer test:setup   # once: a throw-away install (SQLite by default)
+composer test         # unit + integration tests
+node --test js/tests/*.test.mjs
+```
+
+The integration tests run on SQLite by default; to run them on MySQL / MariaDB, set
+`DB_DRIVER`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD` for
+`composer test:setup` — **never** point them at a real forum's database: every table is
+dropped first.
 
 ## 🔗 Links & credits
 

@@ -3,10 +3,13 @@
 namespace TryHackX\MagnetLink\Service;
 
 use Flarum\Settings\SettingsRepositoryInterface;
+use Illuminate\Contracts\Cache\Lock;
+use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\Repository;
 use Scrapeer\Scraper;
 use Scrapeer\ScraperViaFix;
 use TryHackX\MagnetLink\Model\MagnetLink;
+use TryHackX\MagnetLink\Support\IntSetting;
 use TryHackX\MagnetLink\Support\PublicIp;
 
 /**
@@ -61,6 +64,13 @@ class TrackerScraper
     public const HARD_TIME_BUDGET = 30.0;
 
     /**
+     * Default for `scrape_max_concurrent`: how many uncached scrapes may run at once
+     * server-wide ({@see acquireScrapeSlot}), and the ceiling an admin can raise it to.
+     */
+    public const DEFAULT_MAX_CONCURRENT = 4;
+    private const MAX_CONCURRENT_CEILING = 32;
+
+    /**
      * Max TTL (seconds) for cached *failures*. Kept short so a transient miss —
      * e.g. a tooltip that ran out of its shared time budget before reaching a
      * tracker — recovers quickly (and the full-budget in-post view isn't stuck
@@ -110,10 +120,10 @@ class TrackerScraper
         // never diverge.
         $maxRaw = ($maxTrackersOverride !== null && $maxTrackersOverride > 0)
             ? $maxTrackersOverride
-            : (int) $this->settings->get('tryhackx-magnet-link.max_trackers', 0);
+            : IntSetting::get($this->settings, 'tryhackx-magnet-link.max_trackers', 0);
         $timeoutRaw = ($timeoutOverride !== null && $timeoutOverride > 0)
             ? $timeoutOverride
-            : (int) $this->settings->get('tryhackx-magnet-link.tracker_timeout', 2);
+            : IntSetting::get($this->settings, 'tryhackx-magnet-link.tracker_timeout', 2);
 
         $cacheEnabled = (bool) $this->settings->get('tryhackx-magnet-link.cache_enabled', true);
         $cacheKey = $this->cacheKey($magnet, $maxRaw, $timeoutRaw);
@@ -125,10 +135,30 @@ class TrackerScraper
             }
         }
 
-        $result = $this->computeScrape($magnet, $deadline, $maxRaw, $timeoutRaw);
+        $candidates = $this->candidateTrackers($magnet);
+
+        // Contacting trackers holds this PHP worker for up to its time budget, and an
+        // aborted request (the tooltip cancels its hover on mouseleave) doesn't stop
+        // it. With every slot taken, answer at once — uncached, the frontend retries —
+        // rather than letting hovers / views of many uncached magnets tie up the whole
+        // pool. A magnet with nothing to contact needs no slot.
+        $slot = $candidates ? $this->acquireScrapeSlot() : null;
+        if ($slot === false) {
+            return [
+                'success' => false,
+                'error_type' => 'busy',
+                'message' => 'Tracker statistics are busy, try again in a moment',
+            ];
+        }
+
+        try {
+            $result = $this->computeScrape($magnet, $candidates, $deadline, $maxRaw, $timeoutRaw);
+        } finally {
+            $slot?->release();
+        }
 
         if ($cacheEnabled) {
-            $ttl = (int) $this->settings->get('tryhackx-magnet-link.cache_ttl', 300);
+            $ttl = IntSetting::get($this->settings, 'tryhackx-magnet-link.cache_ttl', 300);
             if ($ttl > 0) {
                 // Cache successes for the full TTL; failures only briefly so a
                 // transient miss doesn't stick around (see FAILURE_CACHE_TTL).
@@ -138,6 +168,43 @@ class TrackerScraper
         }
 
         return $result;
+    }
+
+    /**
+     * Take one of the `scrape_max_concurrent` server-wide slots for an uncached scrape:
+     * cache locks `tryhackx-magnet-link.scrape-slot.N`, shared by every PHP worker (and
+     * every node, with a shared cache store). The lock outlives the hard time budget, so
+     * a worker killed mid-scrape frees its slot on its own.
+     *
+     * @return Lock|null|false the held slot (release it when done); null when the cache
+     *   store can't lock (then nothing is limited); false when every slot is taken
+     */
+    private function acquireScrapeSlot(): Lock|null|false
+    {
+        try {
+            $store = $this->cache->getStore();
+            if (! $store instanceof LockProvider) {
+                return null;
+            }
+
+            $max = IntSetting::get($this->settings, 'tryhackx-magnet-link.scrape_max_concurrent', self::DEFAULT_MAX_CONCURRENT);
+            $max = $max > 0 ? min($max, self::MAX_CONCURRENT_CEILING) : self::DEFAULT_MAX_CONCURRENT;
+            $ttl = (int) self::HARD_TIME_BUDGET + 10;
+
+            // Start at a random slot, so concurrent requests don't all queue up on slot 0.
+            $first = random_int(0, $max - 1);
+            for ($i = 0; $i < $max; $i++) {
+                $lock = $store->lock('tryhackx-magnet-link.scrape-slot.' . (($first + $i) % $max), $ttl);
+                if ($lock->get()) {
+                    return $lock;
+                }
+            }
+
+            return false;
+        } catch (\Throwable $e) {
+            // A failing lock backend must not switch tracker stats off.
+            return null;
+        }
     }
 
     private function cacheKey(MagnetLink $magnet, int $maxRaw, int $timeoutRaw): string
@@ -172,10 +239,9 @@ class TrackerScraper
         return 'tryhackx-magnet-link.scrape.' . strtolower($magnet->info_hash) . '.' . implode('.', $parts);
     }
 
-    private function computeScrape(MagnetLink $magnet, ?float $deadline, int $maxRaw, int $timeoutRaw): array
+    /** @param array<int, string>|null $candidates {@see candidateTrackers} */
+    private function computeScrape(MagnetLink $magnet, ?array $candidates, ?float $deadline, int $maxRaw, int $timeoutRaw): array
     {
-        $candidates = $this->candidateTrackers($magnet);
-
         if ($candidates === null) {
             return [
                 'success' => false,
@@ -203,7 +269,7 @@ class TrackerScraper
         $allowPrivate = (bool) $this->settings->get('tryhackx-magnet-link.allow_private_trackers', false);
         // Liczba przekierowań HTTP do podążenia (np. tracker za Cloudflare robi
         // http→https). Każdy hop i tak jest walidowany guardem SSRF (niżej).
-        $maxRedirects = max(0, min((int) $this->settings->get('tryhackx-magnet-link.scraper_max_redirects', 0), 5));
+        $maxRedirects = max(0, min(IntSetting::get($this->settings, 'tryhackx-magnet-link.scraper_max_redirects', 0), 5));
 
         // Never let one magnet run past the absolute ceiling, even if the
         // caller passed a more generous shared deadline.

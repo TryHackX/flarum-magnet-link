@@ -93,6 +93,11 @@ return [
         // karta w poście). Twardy sufit = TrackerScraper::HARD_TIME_BUDGET (30 s);
         // admin może wydłużyć/skrócić w tym zakresie.
         ->default('tryhackx-magnet-link.topic_scrape_budget', 15)
+        // Ile scrapowań (bez trafienia w cache) może biec NARAZ na całym serwerze.
+        // Każde trzyma workera PHP-FPM do budżetu czasu, a przerwany hover go nie
+        // zatrzymuje — ponad limit API od razu odpowiada „zajęte" (bez cache), więc
+        // szybkie przeglądanie listy / wiele tematów naraz nie zajmie całej puli.
+        ->default('tryhackx-magnet-link.scrape_max_concurrent', Service\TrackerScraper::DEFAULT_MAX_CONCURRENT)
         // Liczba przekierowań HTTP do podążenia przy scrapowaniu (0 = brak; np.
         // tracker za Cloudflare robi http→https). Każdy hop walidowany guardem SSRF.
         ->default('tryhackx-magnet-link.scraper_max_redirects', 0)
